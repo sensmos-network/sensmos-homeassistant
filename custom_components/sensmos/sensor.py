@@ -38,7 +38,9 @@ async def async_setup_entry(
     ]
 
     known: set[str] = set()
-    # encje noda karmione z HA pomijamy — inaczej pętla HA→node→HA
+    # Encje karmione z HA TEŻ pokazujemy (echo: user widzi, co node realnie publikuje —
+    # weryfikacja end-to-end). Pętlę HA→node→HA tnie guard w feederze (źródło z domeny
+    # sensmos = odmowa), nie ukrywanie sensora.
     fed = {f["node_entity"] for f in entry.options.get(OPT_FEEDS, [])}
 
     @callback
@@ -51,13 +53,13 @@ async def async_setup_entry(
                 continue
             known.add(eid)
             new.append(PoolSensor(coordinator, device_info, eid))
-        # własne encje noda (pub.* natywne + own.* niestandardowe)
+        # własne encje noda (pub.* natywne + own.* niestandardowe; karmione = też, jako echo)
         for ent in coordinator.node_entities:
             eid = ent.get("entity_id", "")
-            if not eid or eid in known or eid in fed:
+            if not eid or eid in known:
                 continue
             known.add(eid)
-            new.append(NodeEntitySensor(coordinator, device_info, eid))
+            new.append(NodeEntitySensor(coordinator, device_info, eid, fed=eid in fed))
         if new:
             async_add_entities(new)
 
@@ -222,9 +224,21 @@ class PoolSensor(_DynSensor):
 
 
 class NodeEntitySensor(_DynSensor):
-    """Własna encja noda: pub.* (natywna) lub own.* (niestandardowa)."""
+    """Własna encja noda: pub.* (natywna) lub own.* (niestandardowa).
+
+    fed=True → encja karmiona feederem z HA; sensor to ECHO bufora noda
+    (weryfikacja end-to-end). NIE używać go jako źródła feedu (guard w feederze).
+    """
 
     _uid_kind = "node"
+
+    def __init__(self, coordinator, device_info, entity_id: str, fed: bool = False) -> None:
+        super().__init__(coordinator, device_info, entity_id)
+        self._fed = fed
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        return {"fed_from_ha": True} if self._fed else None
 
     def _source(self) -> list[dict[str, Any]]:
         return self.coordinator.node_entities

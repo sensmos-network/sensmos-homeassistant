@@ -50,6 +50,20 @@ class Feeder:
         self._last_value: dict[str, str] = {}    # node_entity → ostatnio wysłane
 
     def start(self) -> None:
+        # Anty-pętla: źródłem feedu nie może być sensor TEJ integracji (od 0.4.8 encje
+        # karmione mają echo-sensor → HA→node→HA w kółko). Odmowa + warning zamiast pętli.
+        from homeassistant.helpers import entity_registry as er
+        reg = er.async_get(self._hass)
+        safe = []
+        for f in self._feeds:
+            ent = reg.async_get(f["ha_entity"])
+            if ent and ent.platform == "sensmos":
+                _LOGGER.warning(
+                    "Feed %s ← %s pominięty: źródło jest sensorem Sensmos (pętla HA→node→HA)",
+                    f["node_entity"], f["ha_entity"])
+                continue
+            safe.append(f)
+        self._feeds = safe
         ha_ids = [f["ha_entity"] for f in self._feeds]
         if not ha_ids:
             return
