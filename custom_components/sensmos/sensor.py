@@ -112,11 +112,13 @@ class GetSensor(CoordinatorEntity[SensmosGet], SensorEntity):
     ) -> None:
         super().__init__(coordinator)
         self._key = f"{device_id}:{entity_id}"
-        self._attr_unique_id = f"{entry.entry_id}_get_{device_id[:12]}_{entity_id}"
+        # BEZ entry.entry_id w tożsamości! Re-add integracji zmienia entry_id → HA tworzył
+        # ZDUBLOWANE urządzenia/encje (stare wisiały wyszarzone). Czysty device_id = stabilne.
+        self._attr_unique_id = f"get_{device_id[:12]}_{entity_id}"
         self._attr_name = f"{prefix}.{entity_id}"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry.entry_id}:get:{device_id}")},
+            identifiers={(DOMAIN, f"get:{device_id}")},
             name=f"Sensmos {prefix} ({device_id[:8]})",
             manufacturer="Sensmos",
             model="Remote node (preview)",

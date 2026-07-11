@@ -119,7 +119,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
+    # Auto-sprzątanie duchów: urządzenia TEGO wpisu, których tożsamość nie pasuje do
+    # aktualnego device_id (np. node przeflashowany → nowe ID, stary wpis wisiał wyszarzony).
+    dev_reg = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        idents = {i[1] for i in device.identifiers if i[0] == DOMAIN}
+        if idents and device_id not in idents:
+            dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
+
     _register_services(hass)
+    return True
+
+
+# Przycisk „Usuń urządzenie" w UI urządzenia — HA pokazuje go TYLKO gdy integracja
+# implementuje tę funkcję. Pozwalamy usuwać wszystko: żywe urządzenie i tak odtworzy
+# się przy najbliższym odświeżeniu encji, a duchy znikają na stałe.
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
     return True
 
 
