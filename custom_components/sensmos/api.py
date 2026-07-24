@@ -72,9 +72,22 @@ class SensmosApi:
         return await self._request("GET", "/data/native")
 
     async def remote_available(self, esp_id: str) -> dict[str, Any]:
-        return await self._request(
-            "GET", f"/remote/available?esp_id={esp_id}", timeout=12
-        )
+        # 0.73: katalog czytamy z BE wprost (publiczne /v1/data/available), nie z noda —
+        # /remote/available na nodzie skasowane (było proxy tego samego publicznego odczytu).
+        from .const import BE_AVAILABLE_URL
+        try:
+            async with asyncio.timeout(12):
+                resp = await self._session.get(f"{BE_AVAILABLE_URL}{esp_id}")
+                body = await resp.json(content_type=None)
+                if resp.status >= 400:
+                    raise SensmosApiError(
+                        body.get("error", f"HTTP {resp.status}")
+                        if isinstance(body, dict)
+                        else f"HTTP {resp.status}"
+                    )
+                return body if isinstance(body, dict) else {}
+        except (TimeoutError, aiohttp.ClientError) as err:
+            raise SensmosApiError(f"connection: {err}") from err
 
     # ── Zapisy ────────────────────────────────────────────────
 

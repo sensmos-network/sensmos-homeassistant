@@ -19,6 +19,7 @@ CONF_LAT = "lat"
 CONF_LON = "lon"
 BE_INGEST_URL = "https://api.sensmos.com/v1/ingest"
 BE_GET_URL = "https://api.sensmos.com/v1/ingest/get/"  # + device_id
+BE_AVAILABLE_URL = "https://api.sensmos.com/v1/data/available/"  # + device_id (katalog, publiczne)
 DATA_MIN_KEY_LEN = 32
 DATA_DEFAULT_INTERVAL = 60
 DATA_MIN_INTERVAL = 20
