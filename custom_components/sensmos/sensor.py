@@ -10,12 +10,20 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ENTITY_GRACE_S, MODE_DATA, OPT_FEEDS, POOL_EXCLUDED_PREFIXES
+from .const import (
+    DOMAIN,
+    ENTITY_GRACE_S,
+    MODE_DATA,
+    OPT_FEEDS,
+    POOL_EXCLUDED_PREFIXES,
+    telemetry_key,
+)
 from .coordinator import SensmosCoordinator
 from .get import SensmosGet
 
@@ -39,6 +47,7 @@ async def async_setup_entry(
     ]
 
     known: set[str] = set()
+    known_mon: set[str] = set()   # osobno: kluczem jest goły klucz telemetrii, nie eid
     # Encje karmione z HA TEŻ pokazujemy (echo: user widzi, co node realnie publikuje —
     # weryfikacja end-to-end). Pętlę HA→node→HA tnie guard w feederze (źródło z domeny
     # sensmos = odmowa), nie ukrywanie sensora.
@@ -54,6 +63,13 @@ async def async_setup_entry(
                 continue
             known.add(eid)
             new.append(PoolSensor(coordinator, device_info, eid))
+        # telemetria noda (mon.<klucz> z FW ≥0.75 albo pub.<klucz> ze starszych) → diagnostyka
+        for ent in coordinator.mon_entities:
+            key = telemetry_key(ent.get("entity_id", ""))
+            if not key or key in known_mon:
+                continue
+            known_mon.add(key)
+            new.append(MonSensor(coordinator, device_info, key))
         # własne encje noda (pub.* natywne + own.* niestandardowe; karmione = też, jako echo)
         for ent in coordinator.node_entities:
             eid = ent.get("entity_id", "")
@@ -260,6 +276,36 @@ class NodeEntitySensor(_DynSensor):
 
     def _source(self) -> list[dict[str, Any]]:
         return self.coordinator.node_entities
+
+
+class MonSensor(_DynSensor):
+    """Telemetria noda (WiFi/NET/uptime) — encja diagnostyczna.
+
+    Ta sama wartość przychodzi jako mon.<klucz> (FW ≥0.75) albo pub.<klucz> (starsze FW),
+    więc dopasowujemy po KLUCZU, nie po pełnym eid: OTA (w obie strony) nie tworzy
+    drugiego sensora i nie gasi istniejącego.
+    """
+
+    _uid_kind = "node"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, coordinator: SensmosCoordinator, device_info: DeviceInfo, key: str
+    ) -> None:
+        # LEGACY unique_id: człon zostaje "pub.<klucz>" — dokładnie ten string, który ta
+        # encja ma dziś jako NodeEntitySensor. Zero migracji, zero duchów, bezpieczny rollback FW.
+        super().__init__(coordinator, device_info, f"pub.{key}")
+        self._key = key
+        self._attr_name = f"mon.{key}"
+
+    def _source(self) -> list[dict[str, Any]]:
+        return self.coordinator.mon_entities
+
+    def _find(self) -> dict[str, Any] | None:
+        for ent in self._source():
+            if telemetry_key(ent.get("entity_id", "")) == self._key:
+                return ent
+        return None
 
 
 class UptimeSensor(_Base):

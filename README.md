@@ -16,6 +16,7 @@ Bring Sensmos into Home Assistant — two ways:
 - **Subscription sensors** — data your node subscribes to from other nodes (`sub.*` / your prefix) appears as HA sensors as soon as it arrives.
 - **Subscribe from HA** — pick a target node's device ID, preview its entities, confirm; sensors appear on their own.
 - **Node status** — uptime, online, backend (WS) connectivity.
+- **Node telemetry as diagnostics** — WiFi/network health (`wifi_rssi`, `net_ping`, `link_loss`…) lands in the device's *Diagnostic* section instead of cluttering your sensor list.
 - **Node events as HA events** — `sensmos_event` (batch_sent, sub_received, ws_connected) and `sensmos_message` (incoming message) for automations. The webhook is configured on the node automatically.
 
 ## Installation

@@ -37,6 +37,8 @@ from .const import (
     OPT_MAPPINGS,
     OPT_PUSH_INTERVAL,
     OPT_WEBHOOK,
+    RESERVED_PREFIXES,
+    telemetry_key,
 )
 from .units import device_classes_for_unit
 
@@ -277,6 +279,8 @@ class SensmosOptionsFlow(OptionsFlow):
         if user_input is not None:
             did = user_input["device_id"].strip().lower()
             prefix = _slugify(user_input.get("prefix") or "node") or "node"
+            if prefix in RESERVED_PREFIXES:
+                prefix = "node"
             if not re.fullmatch(r"[0-9a-f]{64}", did):
                 errors["device_id"] = "invalid_device_id"
             else:
@@ -411,7 +415,8 @@ class SensmosOptionsFlow(OptionsFlow):
         options = []
         for ent in native:
             pub_id = ent.get("pub_id") or f"pub.{ent['entity_id']}"
-            if pub_id in mapped:
+            # telemetria noda (mon.*/pub.<klucz NET>) nie jest celem karmienia — node liczy ją sam
+            if pub_id in mapped or telemetry_key(pub_id):
                 continue
             unit = ent.get("unit") or ""
             label = f"{pub_id}  [{unit}]" if unit else pub_id
@@ -555,6 +560,8 @@ class SensmosOptionsFlow(OptionsFlow):
         if user_input is not None:
             esp_id = user_input["esp_id"].strip()
             prefix = _slugify(user_input.get("prefix") or "sub") or "sub"
+            if prefix in RESERVED_PREFIXES:
+                prefix = "sub"   # zarezerwowane przez FW (bufory pub/own/tmp/mon)
             days = int(user_input.get("days", 7))
             api = self._api()
             try:

@@ -37,10 +37,12 @@ OPT_GETS = "gets"               # [{device_id, prefix}]             (tryb data �
 OPT_GET_INTERVAL = "get_interval"  # sekundy                        (tryb data)
 
 # coordinator
-# PAKIETOWANIE: node ma tylko pub[16], a ~11 slotów okupują stałe monitoringowe (pub.wifi_*/net_*/link_*/
-# node_ping/uptime — zawsze świeże, nigdy nieeksmitowane). Na sensory usera zostaje ~5 slotów -> rotują.
-# /data/status to "pakiet" (bieżący snapshot); częstszy sampling łapie rotujące sensory w oknie ich życia
-# w buforze, a sticky (_current) akumuluje pakiety w komplet. 15 s < typowy czas życia sensora w buforze.
+# PAKIETOWANIE: /data/status to "pakiet" (bieżący snapshot małych buforów noda), nie pełny stan.
+# Flota bez OTA (FW <0.75) trzyma ~11 encji telemetrii w pub[16] — na sensory usera zostaje ~5 slotów,
+# więc rotują. FW ≥0.75 (mon-split) przeniósł telemetrię do mon[12] i pub[16] jest w całości usera —
+# powód rotacji znika po OTA floty, ale bufor dalej jest mały (>16 encji nadal rotuje), więc wartości
+# zostają. Częstszy sampling łapie encję w oknie jej życia w buforze, a sticky (_current) akumuluje
+# pakiety w komplet. 15 s < typowy czas życia sensora w buforze.
 SCAN_INTERVAL_S = 15        # /data/status (było 30 — za rzadko na rotujący bufor)
 SLOW_EVERY_N_CYCLES = 20    # /config, /data/native co N cykli (=300 s przy 15 s — jak było)
 # Encje zostają "available" tyle po OSTATNIM udanym pollu. Jeden nieudany poll /data/status
@@ -58,7 +60,43 @@ FEED_MIN_INTERVAL_S = 15    # min odstęp push per mapowanie
 FEED_KEEPALIVE_S = 300      # odśwież wartość na nodzie nawet bez zmiany
 
 # pool — prefiksy wykluczone z sensorów (udostępniamy tylko dane subskrypcji)
-POOL_EXCLUDED_PREFIXES = ("get.", "msg.")
+# mon.* = telemetria noda (ma własne sensory diagnostyczne) — gdyby uszkodzone/stare FW
+# wrzuciło ją do pool[], nie chcemy z tego drugiego kompletu encji.
+POOL_EXCLUDED_PREFIXES = ("get.", "msg.", "mon.")
+
+# Telemetria noda — zamknięty zbiór 11 encji (kategoria NET w BE).
+# FW ≥0.75 wysyła je w osobnej tablicy status["mon"] jako mon.<klucz>; starsze FW trzymają
+# je w status["pub"] jako pub.<klucz> — stąd rozpoznanie po nazwie (flota bez OTA działa dalej).
+MON_KEYS = frozenset({
+    "wifi_rssi", "wifi_nets", "uptime_s",
+    "net_ping", "net_jitter", "net_loss",
+    "node_ping", "node_peers",
+    "link_ping", "link_jitter", "link_loss",
+    # net_score liczy BE (nie node), ale jest kategorii NET i widnieje w katalogu /data/native —
+    # bez niego user mógłby go wybrać jako cel feedu i nadpisać wyliczoną jakość łącza na mapie.
+    "net_score",
+})
+
+
+# Prefiksy zarezerwowane przez firmware (własne bufory: pub/own/tmp/mon) — subskrypcja ani
+# podgląd nie mogą ich użyć. FW ≥0.75 sanityzuje je na „sub" przy odczycie z NVS; tu blokujemy
+# u źródła, żeby user nie założył subskrypcji, której encje po aktualizacji zniknęłyby z HA.
+RESERVED_PREFIXES = frozenset({"pub", "own", "tmp", "mon"})
+
+
+def telemetry_key(entity_id: str) -> str | None:
+    """entity_id → klucz telemetrii albo None (= zwykła encja usera).
+
+    Zamknięta lista MON_KEYS obowiązuje dla OBU prefiksów: mon.<klucz> (FW ≥0.75)
+    i pub.<klucz> (starsze FW). Bramka na mon.* jest konieczna, bo POST /data wpycha
+    do bufora mon[] DOWOLNY klucz — bez niej mon.temperature dostałby legacy uid
+    "..._node_pub.temperature", czyli ten sam co REALNA encja pub.temperature usera
+    (HA odrzuciłby drugą i czujnik zniknąłby). Klucz spoza listy = zwykła encja.
+    """
+    if entity_id.startswith(("mon.", "pub.")):
+        entity_id = entity_id[4:]
+    return entity_id if entity_id in MON_KEYS else None
+
 
 EVENT_NODE = "sensmos_event"
 EVENT_MESSAGE = "sensmos_message"

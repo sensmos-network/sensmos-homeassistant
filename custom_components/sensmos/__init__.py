@@ -25,6 +25,7 @@ from .const import (
     OPT_FEEDS,
     OPT_WEBHOOK,
     PLATFORMS,
+    telemetry_key,
 )
 from .coordinator import SensmosCoordinator
 from .direct import SensmosDirect
@@ -202,10 +203,16 @@ def _register_services(hass: HomeAssistant) -> None:
         return
 
     async def handle_push(call: ServiceCall) -> None:
+        entity_id: str = call.data["entity_id"]
+        # ta sama bramka co w feederze/config_flow: telemetria noda jest tylko do odczytu
+        if telemetry_key(entity_id):
+            raise ValueError(
+                f"{entity_id}: telemetria noda (tylko do odczytu) — node liczy ją sam"
+            )
         data = _entry_data_for_call(hass, call)
         api: SensmosApi = data["api"]
         await api.push_data(
-            call.data["entity_id"], call.data["value"], call.data.get("unit", "")
+            entity_id, call.data["value"], call.data.get("unit", "")
         )
 
     hass.services.async_register(

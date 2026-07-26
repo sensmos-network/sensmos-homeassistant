@@ -19,7 +19,7 @@ from homeassistant.helpers.event import (
 )
 
 from .api import SensmosApi, SensmosApiError
-from .const import FEED_KEEPALIVE_S, FEED_MIN_INTERVAL_S
+from .const import FEED_KEEPALIVE_S, FEED_MIN_INTERVAL_S, telemetry_key
 from .units import convert
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,6 +56,15 @@ class Feeder:
         reg = er.async_get(self._hass)
         safe = []
         for f in self._feeds:
+            # Telemetria noda (mon.* i stare pub.<klucz NET>) jest tylko do odczytu — node liczy
+            # ją sam i wysyła na mapę. Ten sam test co w config_flow (telemetry_key, nie sam
+            # prefiks): feed zapisany w 0.4.x mógł celować w pub.uptime_s — wtedy zatruwał
+            # telemetrię floty, a echo-sensor tej encji znikał bez śladu.
+            if telemetry_key(f["node_entity"]):
+                _LOGGER.warning(
+                    "Feed %s ← %s pominięty: to telemetria noda (tylko do odczytu) — usuń go "
+                    "z opcji integracji", f["node_entity"], f["ha_entity"])
+                continue
             ent = reg.async_get(f["ha_entity"])
             if ent and ent.platform == "sensmos":
                 _LOGGER.warning(
