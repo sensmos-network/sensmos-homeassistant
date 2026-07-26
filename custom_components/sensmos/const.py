@@ -39,6 +39,10 @@ OPT_GET_INTERVAL = "get_interval"  # sekundy                        (tryb data)
 # coordinator
 SCAN_INTERVAL_S = 30        # /data/status
 SLOW_EVERY_N_CYCLES = 10    # /config, /data/native co N cykli
+# Encje zostają "available" tyle po OSTATNIM udanym pollu. Jeden nieudany poll /data/status
+# (node zajęty BLE/checknet, WiFi-blip, timeout 8 s) NIE może zdejmować wszystkich sensorów —
+# HA wciąż trzyma świeży snapshot, a mapa (BE/WS) ma dane. Realna awaria (>grace) → unavailable.
+AVAIL_GRACE_S = SCAN_INTERVAL_S * 3   # 90 s ≈ 2 pominięte polle
 
 # feeder
 FEED_MIN_INTERVAL_S = 15    # min odstęp push per mapowanie

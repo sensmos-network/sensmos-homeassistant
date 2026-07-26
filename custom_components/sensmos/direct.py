@@ -90,8 +90,8 @@ class SensmosDirect:
                 BE_INGEST_URL, json=body, timeout=aiohttp.ClientTimeout(total=10)
             ) as resp:
                 if resp.status == 200:
-                    _LOGGER.debug("Sensmos: wysłano %d encji", len(entities))
+                    _LOGGER.debug("Sensmos: sent %d entities", len(entities))
                 else:
                     _LOGGER.warning("Sensmos ingest HTTP %s", resp.status)
         except (aiohttp.ClientError, TimeoutError) as err:
-            _LOGGER.warning("Sensmos ingest błąd: %s", err)
+            _LOGGER.warning("Sensmos ingest error: %s", err)

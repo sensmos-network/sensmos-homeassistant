@@ -56,7 +56,7 @@ class SensmosGet(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                         continue
                     payload = await resp.json()
             except (aiohttp.ClientError, TimeoutError) as err:
-                _LOGGER.debug("Sensmos get %s błąd: %s", did[:8], err)
+                _LOGGER.debug("Sensmos get %s error: %s", did[:8], err)
                 continue
 
             online = bool(payload.get("active"))

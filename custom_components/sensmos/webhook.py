@@ -59,7 +59,7 @@ async def async_setup_node_webhook(
     try:
         base = get_url(hass, prefer_external=False, allow_internal=True, allow_ip=True)
     except NoURLAvailableError:
-        _LOGGER.warning("Brak URL instancji HA — webhook zdarzeń nieustawiony na nodzie")
+        _LOGGER.warning("No HA instance URL — event webhook not set on the node")
         return wh_id
 
     url = f"{base}{webhook.async_generate_path(wh_id)}"
@@ -67,7 +67,7 @@ async def async_setup_node_webhook(
         await api.set_integration_url(url)
         _LOGGER.info("integration_url noda %s → %s", device_id[:8], url)
     except SensmosApiError as err:
-        _LOGGER.warning("Nie udało się ustawić integration_url: %s", err)
+        _LOGGER.warning("Failed to set integration_url: %s", err)
     return wh_id
 
 

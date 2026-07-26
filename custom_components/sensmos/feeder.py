@@ -59,7 +59,7 @@ class Feeder:
             ent = reg.async_get(f["ha_entity"])
             if ent and ent.platform == "sensmos":
                 _LOGGER.warning(
-                    "Feed %s ← %s pominięty: źródło jest sensorem Sensmos (pętla HA→node→HA)",
+                    "Feed %s ← %s skipped: source is a Sensmos sensor (HA→node→HA loop)",
                     f["node_entity"], f["ha_entity"])
                 continue
             safe.append(f)
@@ -137,7 +137,7 @@ class Feeder:
             converted = convert(value, ha_unit, target_unit)
             if converted is None:
                 _LOGGER.warning(
-                    "Feed %s: jednostki %s→%s nieprzeliczalne, wysyłam surowo",
+                    "Feed %s: units %s→%s not convertible, sending raw",
                     node_entity, ha_unit, target_unit,
                 )
                 unit_out = ha_unit
@@ -156,4 +156,4 @@ class Feeder:
             self._last_value[node_entity] = value
             _LOGGER.debug("Feed %s = %s %s", node_entity, value, unit)
         except SensmosApiError as err:
-            _LOGGER.warning("Feed %s nie powiódł się: %s", node_entity, err)
+            _LOGGER.warning("Feed %s failed: %s", node_entity, err)

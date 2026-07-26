@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -9,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import SensmosApi, SensmosApiError
-from .const import DOMAIN, SCAN_INTERVAL_S, SLOW_EVERY_N_CYCLES
+from .const import AVAIL_GRACE_S, DOMAIN, SCAN_INTERVAL_S, SLOW_EVERY_N_CYCLES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,12 +31,14 @@ class SensmosCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_id = device_id
         self._cycle = 0
         self._slow: dict[str, Any] = {"config": {}, "native": []}
+        self._last_ok = 0.0   # monotonic ostatniego udanego /data/status
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             status = await self.api.data_status()
         except SensmosApiError as err:
             raise UpdateFailed(str(err)) from err
+        self._last_ok = time.monotonic()
 
         if self._cycle % SLOW_EVERY_N_CYCLES == 0:
             try:
@@ -50,6 +53,17 @@ class SensmosCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cycle += 1
 
         return {"status": status, **self._slow}
+
+    @property
+    def entities_alive(self) -> bool:
+        """Encje dostępne, gdy ostatni poll się udał LUB jesteśmy w oknie grace po nim.
+
+        Chroni przed migotaniem: pojedynczy timeout /data/status nie zdejmuje wszystkich
+        sensorów, bo HA i tak trzyma ostatni dobry snapshot (wartości nadal świeże).
+        """
+        if self.last_update_success:
+            return True
+        return (time.monotonic() - self._last_ok) < AVAIL_GRACE_S
 
     @property
     def pool_entities(self) -> list[dict[str, Any]]:

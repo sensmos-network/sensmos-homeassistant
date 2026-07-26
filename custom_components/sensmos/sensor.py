@@ -188,7 +188,9 @@ class _DynSensor(_Base):
 
     @property
     def available(self) -> bool:
-        return super().available and self._find() is not None
+        # entities_alive (nie super().available/last_update_success) — jeden nieudany poll
+        # nie zdejmuje sensora, dopóki trzymamy świeży snapshot (okno grace w koordynatorze).
+        return self.coordinator.entities_alive and self._find() is not None
 
     @property
     def native_value(self) -> Any:
