@@ -43,6 +43,11 @@ SLOW_EVERY_N_CYCLES = 10    # /config, /data/native co N cykli
 # (node zajęty BLE/checknet, WiFi-blip, timeout 8 s) NIE może zdejmować wszystkich sensorów —
 # HA wciąż trzyma świeży snapshot, a mapa (BE/WS) ma dane. Realna awaria (>grace) → unavailable.
 AVAIL_GRACE_S = SCAN_INTERVAL_S * 3   # 90 s ≈ 2 pominięte polle
+# Bufory noda są małe i stałe (pub[16]/own[16]/pool[64]); /data/status zwraca tylko to, co AKTUALNIE
+# w buforze. Encja chwilowo wyparta (rotacja/ewikcja przy >slotów encjach, albo prune own.*) znika ze
+# snapshotu -> sensor migałby na "unavailable" mimo świeżej wartości. Trzymamy ją "sticky" tyle po
+# ostatnim realnym odczycie. (Prawdziwy fix przepełnienia = większe bufory w FW; to jest po stronie HA.)
+ENTITY_GRACE_S = 900   # 15 min — mostkuje rotację bufora + keepalive feedera (300 s)
 
 # feeder
 FEED_MIN_INTERVAL_S = 15    # min odstęp push per mapowanie

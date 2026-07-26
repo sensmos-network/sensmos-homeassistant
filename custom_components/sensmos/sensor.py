@@ -1,6 +1,7 @@
 """Sensmos — sensory: dane subskrypcji (sub.*) + statusy noda (uptime)."""
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -14,7 +15,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MODE_DATA, OPT_FEEDS, POOL_EXCLUDED_PREFIXES
+from .const import DOMAIN, ENTITY_GRACE_S, MODE_DATA, OPT_FEEDS, POOL_EXCLUDED_PREFIXES
 from .coordinator import SensmosCoordinator
 from .get import SensmosGet
 
@@ -176,6 +177,8 @@ class _DynSensor(_Base):
         self._attr_unique_id = f"{coordinator.device_id}_{self._uid_kind}_{entity_id}"
         self._attr_name = entity_id
         self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._cached: dict[str, Any] | None = None   # ostatnia znana encja (sticky przy wyparciu z bufora)
+        self._cached_mono = 0.0
 
     def _source(self) -> list[dict[str, Any]]:
         raise NotImplementedError
@@ -186,15 +189,28 @@ class _DynSensor(_Base):
                 return ent
         return None
 
+    def _current(self) -> dict[str, Any] | None:
+        """Encja z bieżącego snapshotu; gdy chwilowo wypadła z małego bufora noda
+        (rotacja/ewikcja/prune) — ostatnia znana przez ENTITY_GRACE_S, żeby sensor nie
+        migał na 'unavailable' mimo świeżej wartości. Dopiero realnie stara -> None."""
+        ent = self._find()
+        if ent is not None:
+            self._cached = ent
+            self._cached_mono = time.monotonic()
+            return ent
+        if self._cached is not None and (time.monotonic() - self._cached_mono) < ENTITY_GRACE_S:
+            return self._cached
+        return None
+
     @property
     def available(self) -> bool:
-        # entities_alive (nie super().available/last_update_success) — jeden nieudany poll
-        # nie zdejmuje sensora, dopóki trzymamy świeży snapshot (okno grace w koordynatorze).
-        return self.coordinator.entities_alive and self._find() is not None
+        # _current() (nie samo _find()) — encja chwilowo wyparta z małego bufora noda zostaje
+        # dostępna ze sticky wartością; entities_alive chroni dodatkowo przy nieudanym pollu.
+        return self.coordinator.entities_alive and self._current() is not None
 
     @property
     def native_value(self) -> Any:
-        ent = self._find()
+        ent = self._current()
         if ent is None:
             return None
         val = ent.get("value")
@@ -207,12 +223,12 @@ class _DynSensor(_Base):
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        ent = self._find()
+        ent = self._current()
         return (ent or {}).get("unit") or None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        ent = self._find() or {}
+        ent = self._current() or {}
         return {"age_s": ent.get("age_s")}
 
 
