@@ -37,12 +37,16 @@ OPT_GETS = "gets"               # [{device_id, prefix}]             (tryb data �
 OPT_GET_INTERVAL = "get_interval"  # sekundy                        (tryb data)
 
 # coordinator
-SCAN_INTERVAL_S = 30        # /data/status
-SLOW_EVERY_N_CYCLES = 10    # /config, /data/native co N cykli
+# PAKIETOWANIE: node ma tylko pub[16], a ~11 slotów okupują stałe monitoringowe (pub.wifi_*/net_*/link_*/
+# node_ping/uptime — zawsze świeże, nigdy nieeksmitowane). Na sensory usera zostaje ~5 slotów -> rotują.
+# /data/status to "pakiet" (bieżący snapshot); częstszy sampling łapie rotujące sensory w oknie ich życia
+# w buforze, a sticky (_current) akumuluje pakiety w komplet. 15 s < typowy czas życia sensora w buforze.
+SCAN_INTERVAL_S = 15        # /data/status (było 30 — za rzadko na rotujący bufor)
+SLOW_EVERY_N_CYCLES = 20    # /config, /data/native co N cykli (=300 s przy 15 s — jak było)
 # Encje zostają "available" tyle po OSTATNIM udanym pollu. Jeden nieudany poll /data/status
 # (node zajęty BLE/checknet, WiFi-blip, timeout 8 s) NIE może zdejmować wszystkich sensorów —
 # HA wciąż trzyma świeży snapshot, a mapa (BE/WS) ma dane. Realna awaria (>grace) → unavailable.
-AVAIL_GRACE_S = SCAN_INTERVAL_S * 3   # 90 s ≈ 2 pominięte polle
+AVAIL_GRACE_S = 90   # stałe (niezależne od SCAN) ≈ tolerancja ~6 pominiętych polli przy 15 s
 # Bufory noda są małe i stałe (pub[16]/own[16]/pool[64]); /data/status zwraca tylko to, co AKTUALNIE
 # w buforze. Encja chwilowo wyparta (rotacja/ewikcja przy >slotów encjach, albo prune own.*) znika ze
 # snapshotu -> sensor migałby na "unavailable" mimo świeżej wartości. Trzymamy ją "sticky" tyle po
