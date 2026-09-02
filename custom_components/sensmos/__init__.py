@@ -44,6 +44,16 @@ SERVICE_PUSH_SCHEMA = vol.Schema(
     }
 )
 
+SERVICE_LORA_SEND_SCHEMA = vol.Schema(
+    {
+        vol.Optional("device_id"): cv.string,
+        vol.Required("dst"): vol.All(cv.string, vol.Match(r"^[0-9a-fA-F]{8}$")),
+        vol.Optional("sub", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
+        vol.Required("payload"): vol.All(cv.string, vol.Length(min=1, max=128)),
+        vol.Optional("aes", default=True): cv.boolean,
+    }
+)
+
 
 async def _async_setup_data_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Tryb 'data' — bez fizycznego noda; wysyłka encji HA na żywą mapę."""
@@ -100,7 +110,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         configuration_url=f"http://{entry.data[CONF_HOST]}",
     )
 
-    coordinator = SensmosCoordinator(hass, api, device_id)
+    # Pole `lora` w /info = FW ≥ lora9 wykryło SX1262 → encje/zdarzenia/serwis LoRa.
+    lora = isinstance(info.get("lora"), dict)
+    coordinator = SensmosCoordinator(hass, api, device_id, lora=lora)
     await coordinator.async_config_entry_first_refresh()
 
     feeder = Feeder(hass, api, entry.options.get(OPT_FEEDS, []))
@@ -115,6 +127,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "feeder": feeder,
         "device_info": device_info,
         "device_id": device_id,
+        "lora": lora,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -217,4 +230,20 @@ def _register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN, "push", handle_push, schema=SERVICE_PUSH_SCHEMA
+    )
+
+    async def handle_lora_send(call: ServiceCall) -> None:
+        data = _entry_data_for_call(hass, call)
+        if not data.get("lora"):
+            raise ValueError("Ten node nie ma radia LoRa")
+        api: SensmosApi = data["api"]
+        await api.lora_send(
+            call.data["dst"].lower(),
+            call.data["payload"],
+            sub=call.data.get("sub", 0),
+            aes=call.data.get("aes", True),
+        )
+
+    hass.services.async_register(
+        DOMAIN, "lora_send", handle_lora_send, schema=SERVICE_LORA_SEND_SCHEMA
     )

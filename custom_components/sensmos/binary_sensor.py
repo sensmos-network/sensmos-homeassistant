@@ -21,12 +21,43 @@ async def async_setup_entry(
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: SensmosCoordinator = data["coordinator"]
     device_info: DeviceInfo = data["device_info"]
-    async_add_entities(
-        [
-            NodeOnlineSensor(coordinator, device_info),
-            WsConnectedSensor(coordinator, device_info),
-        ]
-    )
+    entities: list[BinarySensorEntity] = [
+        NodeOnlineSensor(coordinator, device_info),
+        WsConnectedSensor(coordinator, device_info),
+    ]
+    if coordinator.lora:
+        entities.append(LoraEmergencySensor(coordinator, device_info))
+    async_add_entities(entities)
+
+
+class LoraEmergencySensor(CoordinatorEntity[SensmosCoordinator], BinarySensorEntity):
+    """Tryb awaryjny LoRa: node stracił uplink i nadaje ≤4 encje beaconem.
+
+    Do automatyzacji typu „przy awarii wpisz own.status=POZAR" — feeder działa po LAN,
+    więc wartość trafia do beaconu (ASCII ≤8 znaków) i właściciel widzi ją w apce
+    bez internetu.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_name = "LoRa emergency"
+    _attr_icon = "mdi:access-point-network"
+
+    def __init__(
+        self, coordinator: SensmosCoordinator, device_info: DeviceInfo
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_device_info = device_info
+        self._attr_unique_id = f"{coordinator.device_id}_lora_emergency"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.lora_emerg.get("active"))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        e = self.coordinator.lora_emerg
+        return {"entities": e.get("eids") or [], "webhook": bool(e.get("webhook"))}
 
 
 class NodeOnlineSensor(CoordinatorEntity[SensmosCoordinator], BinarySensorEntity):

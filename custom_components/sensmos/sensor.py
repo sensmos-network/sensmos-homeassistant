@@ -45,9 +45,15 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         UptimeSensor(coordinator, device_info),
     ]
+    if coordinator.lora:
+        entities += [
+            LoraLastCommandSensor(coordinator, device_info),
+            LoraRoleSensor(coordinator, device_info),
+        ]
 
     known: set[str] = set()
     known_mon: set[str] = set()   # osobno: kluczem jest goły klucz telemetrii, nie eid
+    known_subs: set[int] = set()  # LoRa: sensor per pod-adres (sub) widziany w inboxie
     # Encje karmione z HA TEŻ pokazujemy (echo: user widzi, co node realnie publikuje —
     # weryfikacja end-to-end). Pętlę HA→node→HA tnie guard w feederze (źródło z domeny
     # sensmos = odmowa), nie ukrywanie sensora.
@@ -77,6 +83,14 @@ async def async_setup_entry(
                 continue
             known.add(eid)
             new.append(NodeEntitySensor(coordinator, device_info, eid, fed=eid in fed))
+        # ramki LoRa: jeden sensor na pod-adres (sub 0 = node-baza, 1..255 = czujniki)
+        if coordinator.lora:
+            for fr in coordinator.lora_frames:
+                sub = int(fr.get("sub") or 0)
+                if sub in known_subs:
+                    continue
+                known_subs.add(sub)
+                new.append(LoraFrameSensor(coordinator, device_info, sub))
         if new:
             async_add_entities(new)
 
@@ -306,6 +320,107 @@ class MonSensor(_DynSensor):
             if telemetry_key(ent.get("entity_id", "")) == self._key:
                 return ent
         return None
+
+
+class LoraLastCommandSensor(_Base):
+    """Ostatnia komenda awaryjna CMD odebrana radiem (właściciel → apka → BE → eter)."""
+
+    _attr_icon = "mdi:console-line"
+
+    def __init__(
+        self, coordinator: SensmosCoordinator, device_info: DeviceInfo
+    ) -> None:
+        super().__init__(coordinator, device_info)
+        self._attr_unique_id = f"{coordinator.device_id}_lora_cmd"
+        self._attr_name = "LoRa last command"
+
+    def _last(self) -> dict[str, Any] | None:
+        cmds = self.coordinator.lora_cmds
+        return cmds[-1] if cmds else None
+
+    @property
+    def native_value(self) -> str | None:
+        c = self._last()
+        return c.get("payload") if c else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        c = self._last() or {}
+        return {"ts": c.get("ts")}
+
+
+class LoraFrameSensor(_Base):
+    """Ostatnia ramka DATA dla danego pod-adresu (sub). Stan = treść (tekst lub hex).
+
+    Ring inboxu noda ma 6 wpisów — gdy ramkę tego sub wyprą inne, sensor trzyma
+    ostatnią znaną wartość (sticky), zamiast migać na unavailable.
+    """
+
+    _attr_icon = "mdi:radio-tower"
+
+    def __init__(
+        self, coordinator: SensmosCoordinator, device_info: DeviceInfo, sub: int
+    ) -> None:
+        super().__init__(coordinator, device_info)
+        self._sub = sub
+        self._attr_unique_id = f"{coordinator.device_id}_lora_frame_{sub}"
+        self._attr_name = "LoRa frame" if sub == 0 else f"LoRa frame sub {sub}"
+        self._cached: dict[str, Any] | None = None
+
+    def _current(self) -> dict[str, Any] | None:
+        for fr in reversed(self.coordinator.lora_frames):
+            if int(fr.get("sub") or 0) == self._sub:
+                self._cached = fr
+                return fr
+        return self._cached
+
+    @property
+    def native_value(self) -> str | None:
+        fr = self._current()
+        if fr is None:
+            return None
+        return fr.get("text") if fr.get("text") is not None else fr.get("hex")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        fr = self._current() or {}
+        return {
+            "sub": self._sub,
+            "encrypted": bool(fr.get("enc")),
+            "via": fr.get("via"),
+            "hex": fr.get("hex"),
+            "ts": fr.get("ts"),
+        }
+
+
+class LoraRoleSensor(_Base):
+    """Rola radia (Point/Scanner) + diagnostyka klucza i odbioru jawnych — z /info.lora."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:antenna"
+
+    def __init__(
+        self, coordinator: SensmosCoordinator, device_info: DeviceInfo
+    ) -> None:
+        super().__init__(coordinator, device_info)
+        self._attr_unique_id = f"{coordinator.device_id}_lora_role"
+        self._attr_name = "LoRa role"
+
+    @property
+    def native_value(self) -> str | None:
+        info = self.coordinator.lora_info
+        if not info:
+            return None
+        return "point" if info.get("role") == 1 else "scanner"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        info = self.coordinator.lora_info
+        return {
+            "board": info.get("board"),
+            "rx_key_set": bool(info.get("rx_key")),
+            "accept_plain": bool(info.get("open")),
+        }
 
 
 class UptimeSensor(_Base):

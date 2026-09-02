@@ -28,3 +28,45 @@ push:
       example: "°C"
       selector:
         text:
+
+lora_send:
+  name: Wyślij ramkę LoRa
+  description: Nadaje ramkę DATA radiem noda do innego noda lub czujnika LoRa (ryczałt SEND wg cennika Sensmos).
+  fields:
+    device_id:
+      name: Node
+      description: Node z radiem LoRa (puste = jedyny skonfigurowany).
+      required: false
+      selector:
+        device:
+          integration: sensmos
+    dst:
+      name: Adresat
+      description: id8 noda-bazy adresata (8 znaków hex).
+      required: true
+      example: ccd6f51f
+      selector:
+        text:
+    sub:
+      name: Pod-adres (sub)
+      description: Numer czujnika za nodem-bazą (0 = sam node).
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 255
+    payload:
+      name: Treść
+      description: Do 128 bajtów.
+      required: true
+      example: "valve=off"
+      selector:
+        text:
+    aes:
+      name: Szyfruj (AES)
+      description: Wymaga wspólnej frazy-klucza na nadawcy i odbiorcy.
+      required: false
+      default: true
+      selector:
+        boolean:

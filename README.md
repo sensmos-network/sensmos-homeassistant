@@ -81,6 +81,45 @@ data:
   unit: "PLN/kWh"
 ```
 
+## LoRa (nodes with a radio, firmware ≥ 0.95-lora9)
+
+If the node reports a radio in `/info` (`lora` field), the integration adds — polling the node's local API every 15 s, no webhook needed:
+
+| Entity / event | What it is |
+|---|---|
+| `binary_sensor.<node>_lora_emergency` | ON while the node has lost its uplink and is broadcasting its emergency entities over LoRa (attributes: `entities`) |
+| `sensor.<node>_lora_last_command` | last emergency command received over the air (from the owner's app) |
+| `sensor.<node>_lora_frame`, `…_lora_frame_sub_N` | last DATA frame per sub-address (state = payload; attributes `encrypted`, `via` = `rf`/`ws`, `hex`, `ts`) — one sensor per LoRa sensor behind this node |
+| `sensor.<node>_lora_role` | `point` / `scanner`, attributes `board`, `rx_key_set`, `accept_plain` |
+| event `sensmos_lora_cmd` | `{device_id, cmd, ts}` |
+| event `sensmos_lora_frame` | `{device_id, sub, text, hex, enc, via, ts}` |
+
+Service **`sensmos.lora_send`** transmits a DATA frame from the node's radio to another node or a LoRa sensor (`dst` = 8-hex id of the target node, `sub` = sensor sub-address, `aes` = encrypt with the shared key phrase). Use it to actuate LoRa sensors from automations:
+
+```yaml
+service: sensmos.lora_send
+data:
+  dst: ccd6f51f
+  sub: 3
+  payload: "valve=off"
+```
+
+Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
+
+```yaml
+trigger:
+  - platform: state
+    entity_id: binary_sensor.garage_lora_emergency
+    to: "on"
+action:
+  - service: sensmos.push
+    data:
+      entity_id: own.status
+      value: "ALARM"
+```
+
+Frame reception uses a key phrase that never leaves the node (set it in the app: node → LoRa). Emergency commands can only be sent from the owner's app (wallet-signed), not from HA. Receiving frames and transmitting are billed as daily flat fees in GALU (see the app: Wallet → Service expenses).
+
 ## Requirements
 
 - A Sensmos node on the same network (firmware with the HTTP API).

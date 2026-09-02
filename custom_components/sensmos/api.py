@@ -89,6 +89,26 @@ class SensmosApi:
         except (TimeoutError, aiohttp.ClientError) as err:
             raise SensmosApiError(f"connection: {err}") from err
 
+    # ── LoRa (FW ≥ lora9; tylko nody, których /info ma pole `lora`) ──
+
+    async def lora_inbox(self) -> dict[str, Any]:
+        """GET /lora/inbox — {cmds:{items:[{ts,payload}]}, frames:{items:[{ts,sub,enc,via,text|hex}]}}."""
+        return await self._request("GET", "/lora/inbox")
+
+    async def lora_emerg(self) -> dict[str, Any]:
+        """GET /node/lora_emerg — {eids:[...], active:bool, webhook, webhook_get}."""
+        return await self._request("GET", "/node/lora_emerg")
+
+    async def lora_send(
+        self, dst: str, payload: str, sub: int = 0, aes: bool = True
+    ) -> dict[str, Any]:
+        """POST /node/lorasend — nadanie ramki DATA własnym radiem noda (ryczałt SEND)."""
+        return await self._request(
+            "POST",
+            "/node/lorasend",
+            {"dst": dst, "sub": sub, "payload": payload, "aes": aes},
+        )
+
     # ── Zapisy ────────────────────────────────────────────────
 
     async def push_data(self, entity_id: str, value: str, unit: str = "") -> None:

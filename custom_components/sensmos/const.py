@@ -100,6 +100,10 @@ def telemetry_key(entity_id: str) -> str | None:
 
 EVENT_NODE = "sensmos_event"
 EVENT_MESSAGE = "sensmos_message"
+# LoRa (FW ≥ lora9): komendy awaryjne i ramki DATA z inboxu noda (GET /lora/inbox),
+# odpytywane w cyklu koordynatora — bez zabierania webhooka noda (to slot usera).
+EVENT_LORA_CMD = "sensmos_lora_cmd"
+EVENT_LORA_FRAME = "sensmos_lora_frame"
 
 PLATFORMS = ["sensor", "binary_sensor"]
 DATA_PLATFORMS = ["sensor"]   # tryb data: tylko sensory (podgląd GET)
