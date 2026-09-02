@@ -91,8 +91,10 @@ If the node reports a radio in `/info` (`lora` field), the integration adds — 
 | `sensor.<node>_lora_last_command` | last emergency command received over the air (from the owner's app) |
 | `sensor.<node>_lora_frame`, `…_lora_frame_sub_N` | last DATA frame per sub-address (state = payload; attributes `encrypted`, `via` = `rf`/`ws`, `hex`, `ts`) — one sensor per LoRa sensor behind this node |
 | `sensor.<node>_lora_role` | `point` / `scanner`, attributes `board`, `rx_key_set`, `accept_plain` |
-| event `sensmos_lora_cmd` | `{device_id, cmd, ts}` |
-| event `sensmos_lora_frame` | `{device_id, sub, text, hex, enc, via, ts}` |
+| event `sensmos_lora_cmd` | `{device_id, node_id, cmd, ts}` |
+| event `sensmos_lora_frame` | `{device_id, node_id, sub, text, hex, enc, via, ts}` |
+
+`device_id` is the Home Assistant device id, `node_id` the Sensmos node id. Every frame and command is one event and one line in the device's logbook ("Activity") — the `lora_frame` sensors only show the latest value at poll time (15 s), so for automations reacting to each frame trigger on the event, not on the sensor state.
 
 Service **`sensmos.lora_send`** transmits a DATA frame from the node's radio to another node or a LoRa sensor (`dst` = 8-hex id of the target node, `sub` = sensor sub-address, `aes` = encrypt with the shared key phrase). Use it to actuate LoRa sensors from automations:
 

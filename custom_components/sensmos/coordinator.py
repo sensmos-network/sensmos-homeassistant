@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import SensmosApi, SensmosApiError
@@ -104,11 +105,14 @@ class SensmosCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._lora_seen is None:
             self._lora_seen = keys
             return
+        # device_id = id urządzenia w rejestrze HA (dziennik „Aktywność" filtruje po nim),
+        # node_id = device_id Sensmos. Każdy nowy wpis = osobne zdarzenie — także gdy kilka
+        # ramek przyszło w jednym oknie pollu (sensor pokazuje wtedy tylko ostatnią).
+        base = {"device_id": self._ha_device_id(), "node_id": self.device_id}
         for c in cmds:
             if ("cmd", c.get("ts"), c.get("payload")) not in self._lora_seen:
                 self.hass.bus.async_fire(
-                    EVENT_LORA_CMD,
-                    {"device_id": self.device_id, "cmd": c.get("payload"), "ts": c.get("ts")},
+                    EVENT_LORA_CMD, {**base, "cmd": c.get("payload"), "ts": c.get("ts")}
                 )
         for f in frames:
             key = ("frame", f.get("ts"), f.get("sub"), f.get("text") or f.get("hex"))
@@ -116,7 +120,7 @@ class SensmosCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.hass.bus.async_fire(
                     EVENT_LORA_FRAME,
                     {
-                        "device_id": self.device_id,
+                        **base,
                         "sub": f.get("sub", 0),
                         "text": f.get("text"),
                         "hex": f.get("hex"),
@@ -126,6 +130,10 @@ class SensmosCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     },
                 )
         self._lora_seen = keys
+
+    def _ha_device_id(self) -> str | None:
+        dev = dr.async_get(self.hass).async_get_device(identifiers={(DOMAIN, self.device_id)})
+        return dev.id if dev else None
 
     @property
     def lora_emerg(self) -> dict[str, Any]:
