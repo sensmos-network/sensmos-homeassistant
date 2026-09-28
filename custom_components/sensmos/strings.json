@@ -6,7 +6,8 @@
         "description": "Choose how to connect:",
         "menu_options": {
           "node": "🔌 Physical node (a Sensmos device on your network)",
-          "data": "🟣 Data only (push HA sensors to the map — no hardware)"
+          "data": "🟣 Data only (push HA sensors to the map — no hardware)",
+          "cloud": "☁️ Sensmos account (your LoRaWAN gateways)"
         }
       },
       "node": {
@@ -26,7 +27,21 @@
           "lat": "Latitude (optional — GeoIP used if empty)",
           "lon": "Longitude (optional)"
         }
+      },
+      "cloud": {
+        "title": "Sensmos account — LoRaWAN gateways",
+        "description": "Connects Home Assistant to your Sensmos account. The gateways you paired in the app become devices here: Home Assistant receives your sensors' LoRa frames and decrypts them itself — the server only passes them on. In the next step a code appears; enter it in the Sensmos app.",
+        "data": {
+          "rx_only": "Receive only (don't transmit through the gateways)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Pair Home Assistant again",
+        "description": "Access to your Sensmos account was revoked or has expired. Pair again with a new code from the app."
       }
+    },
+    "progress": {
+      "wait_phone": "In the Sensmos app open **Settings → Paired devices → Pair a device** and enter the code:\n\n## {code}\n\nThe code is valid for 3 minutes."
     },
     "error": {
       "invalid_pin": "Wrong PIN.",
@@ -34,7 +49,12 @@
       "key_too_short": "Passkey must be at least 32 characters."
     },
     "abort": {
-      "already_configured": "This node is already configured."
+      "already_configured": "This node or account is already configured.",
+      "pair_failed": "Pairing failed: {error}",
+      "pair_timeout": "3 minutes passed without the code being entered in the app. Try again.",
+      "wrong_account": "This is a different account than the one paired before. Add it as a new entry.",
+      "reauth_successful": "Paired again.",
+      "reauth_unsupported": "This entry cannot be paired again — remove it and add it anew."
     }
   },
   "options": {

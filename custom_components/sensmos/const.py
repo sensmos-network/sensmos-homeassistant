@@ -5,12 +5,22 @@ DOMAIN = "sensmos"
 CONF_HOST = "host"
 CONF_PIN = "pin"
 
-# Dwa tryby integracji:
-#   node — fizyczny node Sensmos (host + PIN), dwukierunkowo (jak dotąd)
-#   data — bez sprzętu: wybrane encje HA lecą wprost na żywą mapę (programowy node)
+# Trzy tryby integracji:
+#   node  — fizyczny node Sensmos (host + PIN), dwukierunkowo (jak dotąd)
+#   data  — bez sprzętu: wybrane encje HA lecą wprost na żywą mapę (programowy node)
+#   cloud — konto Sensmos tokenem z apki; urządzenia = sparowane bramy LoRaWAN (§10)
 CONF_MODE = "mode"
 MODE_NODE = "node"
 MODE_DATA = "data"
+MODE_CLOUD = "cloud"
+
+# tryb cloud
+CONF_BE = "be"
+CONF_OWNER = "owner"
+CONF_TOKEN = "token"
+CONF_SCOPES = "scopes"
+BE_URL = "https://api.sensmos.com"
+CLOUD_SCOPES = ("lora.rx", "lora.tx", "push.send")
 
 # tryb data
 CONF_KEY = "key"        # passkey ≥32 znaki → device_id = sha256("sensmos-soft:"+key)

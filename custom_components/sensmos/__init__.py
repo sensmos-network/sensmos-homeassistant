@@ -7,13 +7,14 @@ import logging
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
 
 from .api import SensmosApi, SensmosApiError, SensmosAuthError
+from .cloud import CloudAuthError, CloudConnectError, SensmosCloud
 from .const import (
     CONF_HOST,
     CONF_KEY,
@@ -21,6 +22,7 @@ from .const import (
     CONF_PIN,
     DATA_PLATFORMS,
     DOMAIN,
+    MODE_CLOUD,
     MODE_DATA,
     OPT_FEEDS,
     OPT_WEBHOOK,
@@ -78,9 +80,44 @@ async def _async_setup_data_entry(hass: HomeAssistant, entry: ConfigEntry) -> bo
     return True
 
 
+@callback
+def _sync_gateways(hass: HomeAssistant, entry: ConfigEntry, gateways: list[dict]) -> None:
+    """Urządzenia wpisu chmury = bramy konta; brama zdjęta z konta znika z HA."""
+    dev_reg = dr.async_get(hass)
+    ids = {g["device_id"] for g in gateways}
+    for g in gateways:
+        dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, g["device_id"])},
+            name=g.get("name") or f"LoRaWAN {g['device_id'][:8]}",
+            manufacturer="Sensmos",
+            model="LoRaWAN gateway",
+            serial_number=g.get("eui") or None,
+        )
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        if not {i[1] for i in device.identifiers if i[0] == DOMAIN} & ids:
+            dev_reg.async_remove_device(device.id)
+
+
+async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Tryb 'cloud' — konto Sensmos tokenem; HA jest „mózgiem" sparowanych bram (§10)."""
+    cloud = SensmosCloud(hass, entry, lambda gws: _sync_gateways(hass, entry, gws))
+    try:
+        await cloud.connect()
+    except CloudAuthError as err:
+        raise ConfigEntryAuthFailed(str(err)) from err
+    except CloudConnectError as err:
+        raise ConfigEntryNotReady(str(err)) from err
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"mode": MODE_CLOUD, "cloud": cloud}
+    entry.async_create_background_task(hass, cloud.run(), f"{DOMAIN}_cloud_{entry.entry_id}")
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.data.get(CONF_MODE) == MODE_DATA:
         return await _async_setup_data_entry(hass, entry)
+    if entry.data.get(CONF_MODE) == MODE_CLOUD:
+        return await _async_setup_cloud_entry(hass, entry)
 
     api = SensmosApi(
         async_get_clientsession(hass), entry.data[CONF_HOST], entry.data[CONF_PIN]
@@ -157,6 +194,11 @@ async def async_remove_config_entry_device(
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = hass.data[DOMAIN].get(entry.entry_id)
 
+    if data and data.get("mode") == MODE_CLOUD:
+        await data["cloud"].close()
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        return True
+
     # tryb data — sender (direct) + sensory podglądu (DATA_PLATFORMS)
     if data and data.get("mode") == MODE_DATA:
         data["direct"].stop()
@@ -202,11 +244,11 @@ def _entry_data_for_call(hass: HomeAssistant, call: ServiceCall) -> dict:
         for ident in device.identifiers:
             if ident[0] == DOMAIN:
                 for data in entries.values():
-                    if data["device_id"] == ident[1]:
+                    if data.get("device_id") == ident[1]:
                         return data
     # fallback: potraktuj jako device_id Sensmos
     for data in entries.values():
-        if data["device_id"].startswith(ha_device_id):
+        if data.get("device_id", "").startswith(ha_device_id):
             return data
     raise ValueError(f"Nie znaleziono noda: {ha_device_id}")
 

@@ -1,6 +1,7 @@
 """Sensmos — config flow + options flow (mapowania, subskrypcje)."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from typing import Any
@@ -8,7 +9,7 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -16,19 +17,26 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import SensmosApi, SensmosApiError, SensmosAuthError
 from .const import (
     BE_GET_URL,
+    BE_URL,
+    CLOUD_SCOPES,
+    CONF_BE,
     CONF_HOST,
     CONF_KEY,
     CONF_LABEL,
     CONF_LAT,
     CONF_LON,
     CONF_MODE,
+    CONF_OWNER,
     CONF_PIN,
+    CONF_SCOPES,
+    CONF_TOKEN,
     DATA_DEFAULT_INTERVAL,
     DATA_MIN_INTERVAL,
     DATA_MIN_KEY_LEN,
     DOMAIN,
     GET_DEFAULT_INTERVAL,
     GET_MIN_INTERVAL,
+    MODE_CLOUD,
     MODE_DATA,
     MODE_NODE,
     OPT_FEEDS,
@@ -40,6 +48,7 @@ from .const import (
     RESERVED_PREFIXES,
     telemetry_key,
 )
+from .pairing import Pairing, PairingError
 from .units import device_classes_for_unit
 
 _ENTITY_RE = re.compile(r"^(pub|own)\.[a-z0-9_]+$")
@@ -56,9 +65,15 @@ class SensmosConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    _want: tuple[str, ...] = CLOUD_SCOPES
+    _pairing: Pairing | None = None
+    _pair_task: asyncio.Task | None = None
+    _paired: dict[str, Any] | None = None
+    _pair_error = ""
+
     async def async_step_user(self, user_input=None) -> Any:
-        # Wybór drogi: fizyczny node (host+PIN) albo same dane (passkey → mapa).
-        return self.async_show_menu(step_id="user", menu_options=["node", "data"])
+        # Wybór drogi: fizyczny node (host+PIN), same dane (passkey → mapa) albo konto (bramy).
+        return self.async_show_menu(step_id="user", menu_options=["node", "data", "cloud"])
 
     async def async_step_node(
         self, user_input: dict[str, Any] | None = None
@@ -153,6 +168,99 @@ class SensmosConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+    # ── tryb cloud: konto Sensmos kodem z apki (jak klient Store na komputerze) ──
+
+    async def async_step_cloud(self, user_input=None) -> Any:
+        if user_input is not None:
+            rx_only = user_input.get("rx_only")
+            self._want = tuple(s for s in CLOUD_SCOPES if not (rx_only and s == "lora.tx"))
+            return await self.async_step_cloud_pair()
+        return self.async_show_form(
+            step_id="cloud",
+            data_schema=vol.Schema(
+                {vol.Optional("rx_only", default=False): selector.BooleanSelector()}
+            ),
+        )
+
+    async def async_step_cloud_pair(self, user_input=None) -> Any:
+        session = async_get_clientsession(self.hass)
+        if self._pair_task is None:
+            self._pairing = Pairing(BE_URL)
+            name = f"Home Assistant – {self.hass.config.location_name}"[:40]
+            try:
+                await self._pairing.offer(session, name, list(self._want))
+            except PairingError as err:
+                return self.async_abort(
+                    reason="pair_failed", description_placeholders={"error": str(err)}
+                )
+            self._pair_task = self.hass.async_create_task(self._pairing.wait(session))
+        if not self._pair_task.done():
+            return self.async_show_progress(
+                step_id="cloud_pair",
+                progress_action="wait_phone",
+                progress_task=self._pair_task,
+                description_placeholders={"code": self._pairing.pretty},
+            )
+        task, self._pair_task = self._pair_task, None
+        try:
+            self._paired = task.result()
+        except TimeoutError:
+            self._pair_error = "timeout"
+            return self.async_show_progress_done(next_step_id="cloud_failed")
+        except PairingError as err:
+            self._pair_error = str(err)
+            return self.async_show_progress_done(next_step_id="cloud_failed")
+        return self.async_show_progress_done(next_step_id="cloud_finish")
+
+    async def async_step_cloud_failed(self, user_input=None) -> Any:
+        if self._pair_error == "timeout":
+            return self.async_abort(reason="pair_timeout")
+        return self.async_abort(
+            reason="pair_failed", description_placeholders={"error": self._pair_error}
+        )
+
+    async def async_step_cloud_finish(self, user_input=None) -> Any:
+        p = self._paired or {}
+        owner = str(p["owner"]).lower()
+        be = str(p.get("be") or "")
+        data = {
+            CONF_MODE: MODE_CLOUD,
+            CONF_BE: be if be.startswith("https://") else BE_URL,
+            CONF_OWNER: owner,
+            CONF_TOKEN: p["token"],
+            CONF_SCOPES: list(p.get("scopes") or []),
+        }
+        await self.async_set_unique_id(owner)
+        if self.source == SOURCE_REAUTH:
+            self._abort_if_unique_id_mismatch(reason="wrong_account")
+            return self.async_update_reload_and_abort(self._get_reauth_entry(), data=data)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=f"Sensmos {owner[:6]}…{owner[-4:]}", data=data)
+
+    async def async_step_reauth(self, entry_data) -> Any:
+        # Ponowne parowanie tylko dla konta; node (PIN) nie ma tej ścieżki.
+        if entry_data.get(CONF_MODE) != MODE_CLOUD:
+            return self.async_abort(reason="reauth_unsupported")
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input=None) -> Any:
+        if user_input is not None:
+            had = self._get_reauth_entry().data.get(CONF_SCOPES) or CLOUD_SCOPES
+            self._want = tuple(s for s in CLOUD_SCOPES if s in had) or CLOUD_SCOPES
+            return await self.async_step_cloud_pair()
+        return self.async_show_form(step_id="reauth_confirm")
+
+    @callback
+    def async_remove(self) -> None:
+        # Okno zamknięte w trakcie czekania — nie odpytujemy serwera do końca trzech minut.
+        if self._pair_task is not None:
+            self._pair_task.cancel()
+
+    @classmethod
+    @callback
+    def async_supports_options_flow(cls, config_entry: ConfigEntry) -> bool:
+        return config_entry.data.get(CONF_MODE) != MODE_CLOUD
 
     @staticmethod
     @callback

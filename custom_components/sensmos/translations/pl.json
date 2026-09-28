@@ -6,7 +6,8 @@
         "description": "Wybierz sposób połączenia:",
         "menu_options": {
           "node": "🔌 Fizyczny node (urządzenie Sensmos w Twojej sieci)",
-          "data": "🟣 Same dane (wyślij encje HA na mapę — bez sprzętu)"
+          "data": "🟣 Same dane (wyślij encje HA na mapę — bez sprzętu)",
+          "cloud": "☁️ Konto Sensmos (Twoje bramy LoRaWAN)"
         }
       },
       "node": {
@@ -26,7 +27,21 @@
           "lat": "Szerokość (opcjonalnie — bez tego GeoIP)",
           "lon": "Długość (opcjonalnie)"
         }
+      },
+      "cloud": {
+        "title": "Konto Sensmos — bramy LoRaWAN",
+        "description": "Łączy Home Assistant z Twoim kontem Sensmos. Bramy sparowane w aplikacji staną się tu urządzeniami: HA odbiera ramki LoRa Twoich czujników i sam je odszyfrowuje — serwer tylko je przekazuje. W następnym kroku pojawi się kod; wpisz go w aplikacji Sensmos.",
+        "data": {
+          "rx_only": "Tylko odbiór (bez nadawania przez bramy)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sparuj Home Assistant ponownie",
+        "description": "Dostęp do konta Sensmos został odwołany albo wygasł. Sparuj ponownie nowym kodem z aplikacji."
       }
+    },
+    "progress": {
+      "wait_phone": "W aplikacji Sensmos otwórz **Ustawienia → Sparowane urządzenia → Sparuj urządzenie** i wpisz kod:\n\n## {code}\n\nKod jest ważny 3 minuty."
     },
     "error": {
       "invalid_pin": "Błędny PIN.",
@@ -34,7 +49,12 @@
       "key_too_short": "Passkey musi mieć co najmniej 32 znaki."
     },
     "abort": {
-      "already_configured": "Ten node jest już skonfigurowany."
+      "already_configured": "Ten node albo to konto jest już skonfigurowane.",
+      "pair_failed": "Parowanie nie powiodło się: {error}",
+      "pair_timeout": "Minęły 3 minuty, a kodu nie wpisano w aplikacji. Spróbuj ponownie.",
+      "wrong_account": "To inne konto niż sparowane wcześniej. Dodaj je jako nowy wpis.",
+      "reauth_successful": "Sparowano ponownie.",
+      "reauth_unsupported": "Tego wpisu nie da się sparować ponownie — usuń go i dodaj od nowa."
     }
   },
   "options": {
