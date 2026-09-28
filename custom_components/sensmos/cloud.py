@@ -40,10 +40,14 @@ class SensmosCloud:
         hass: HomeAssistant,
         entry: ConfigEntry,
         on_gateways: Callable[[list[dict[str, Any]]], None],
+        on_frame: Callable[[dict[str, Any]], dict[str, Any] | None],
+        on_stats: Callable[[list[Any]], None],
     ) -> None:
         self.hass = hass
         self.entry = entry
         self._on_gateways = on_gateways
+        self._on_frame = on_frame
+        self._on_stats = on_stats
         be = entry.data[CONF_BE].rstrip("/")
         self._url = be.replace("https://", "wss://", 1).replace("http://", "ws://", 1) + "/v1/term"
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -91,12 +95,18 @@ class SensmosCloud:
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, BACKOFF_MAX_S)
                     continue
+                if self._closing:
+                    await self.close()
+                    return
                 delay = BACKOFF_MIN_S
                 _LOGGER.info("Sensmos cloud: connected, %d gateway(s)", len(self.gateways))
             ws = self._ws
             async for msg in ws:
                 if msg.type is aiohttp.WSMsgType.TEXT:
-                    self._handle(msg.data)
+                    try:
+                        await self._handle(msg.data)
+                    except Exception:   # jedna zła wiadomość nie może zerwać odbioru
+                        _LOGGER.exception("Sensmos cloud: message handling failed")
             self._ws = None
             if self._closing:
                 return
@@ -115,12 +125,20 @@ class SensmosCloud:
         _LOGGER.warning("Sensmos cloud: %s — pair Home Assistant again", why)
         self.entry.async_start_reauth(self.hass)
 
-    def _handle(self, raw: str) -> None:
+    async def _handle(self, raw: str) -> None:
         try:
             m = json.loads(raw)
         except ValueError:
             return
-        if m.get("type") == "gateways":
+        t = m.get("type")
+        if t == "lora_frame":
+            # Kwit jak od noda-bazy: bez niego BE nie wie, że ramkę odczytano (i nie nalicza odbioru).
+            rcpt = self._on_frame(m)
+            if rcpt and self._ws is not None and not self._ws.closed:
+                await self._ws.send_json(rcpt)
+        elif t == "gw_stats":
+            self._on_stats(m.get("gateways") or [])
+        elif t == "gateways":
             self._set_gateways(m.get("gateways") or [])
 
     def _set_gateways(self, gws: list[Any]) -> None:

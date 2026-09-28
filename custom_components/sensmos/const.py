@@ -20,7 +20,9 @@ CONF_OWNER = "owner"
 CONF_TOKEN = "token"
 CONF_SCOPES = "scopes"
 BE_URL = "https://api.sensmos.com"
-CLOUD_SCOPES = ("lora.rx", "lora.tx", "push.send")
+CLOUD_SCOPES = ("lora.rx", "lora.tx")
+OPT_GATEWAYS = "gateways"   # {gw device_id: {key: sha256(fraza) hex, open: bool}}
+GW_STATS_GRACE_S = 180      # BE przysyła diagnostykę bram co 60 s; starsza = encje niedostępne
 
 # tryb data
 CONF_KEY = "key"        # passkey ≥32 znaki → device_id = sha256("sensmos-soft:"+key)
@@ -116,4 +118,5 @@ EVENT_LORA_CMD = "sensmos_lora_cmd"
 EVENT_LORA_FRAME = "sensmos_lora_frame"
 
 PLATFORMS = ["sensor", "binary_sensor"]
+CLOUD_PLATFORMS = ["sensor", "binary_sensor"]
 DATA_PLATFORMS = ["sensor"]   # tryb data: tylko sensory (podgląd GET)

@@ -41,7 +41,7 @@
       }
     },
     "progress": {
-      "wait_phone": "W aplikacji Sensmos otwórz **Ustawienia → Sparowane urządzenia → Sparuj urządzenie** i wpisz kod:\n\n## {code}\n\nKod jest ważny 3 minuty."
+      "wait_phone": "W aplikacji Sensmos otwórz **Ustawienia → Sparowane urządzenia → Sparuj** i wpisz kod:\n\n## {code}\n\nKod jest ważny 3 minuty."
     },
     "error": {
       "invalid_pin": "Błędny PIN.",
@@ -51,6 +51,11 @@
     "abort": {
       "already_configured": "Ten node albo to konto jest już skonfigurowane.",
       "pair_failed": "Parowanie nie powiodło się: {error}",
+      "pair_expired": "Kod wygasł albo został już użyty. Spróbuj ponownie.",
+      "pair_busy": "Za dużo parowań w toku — spróbuj ponownie za minutę.",
+      "pair_invalid": "Nie udało się odczytać odpowiedzi z aplikacji — sparuj ponownie nowym kodem.",
+      "cannot_connect_cloud": "Nie można połączyć się z serwerem Sensmos. Sprawdź połączenie z internetem i spróbuj ponownie.",
+      "already_in_progress": "Konfiguracja tego noda albo konta już trwa.",
       "pair_timeout": "Minęły 3 minuty, a kodu nie wpisano w aplikacji. Spróbuj ponownie.",
       "wrong_account": "To inne konto niż sparowane wcześniej. Dodaj je jako nowy wpis.",
       "reauth_successful": "Sparowano ponownie.",
@@ -139,6 +144,18 @@
         "title": "Przestań podglądać",
         "data": { "remove": "Nody do przestania podglądania" }
       },
+      "gw_pick": {
+        "title": "Wybierz bramę",
+        "data": { "gateway": "Brama LoRaWAN" }
+      },
+      "gw_rx": {
+        "title": "{name} ({id8}) — odbiór ramek LoRa",
+        "description": "Ramki, które Twoje czujniki wysyłają do tej bramy (adres **{id8}**), odszyfrowuje Home Assistant — serwer tylko je przekazuje. Wpisz tę samą frazę-klucz, co w czujnikach. Zapisywany jest tylko jej SHA-256 (klucz). Klucz ustawiony: {key_state}. Zostaw pole puste, aby zachować obecny klucz.",
+        "data": {
+          "passphrase": "Fraza-klucz",
+          "open": "Przyjmuj też ramki jawne (bez szyfrowania) — rozliczane jako odbiór ramek jawnych"
+        }
+      },
       "data_settings": {
         "title": "Ustawienia danych",
         "description": "Lokalizacja jest opcjonalna — bez niej serwer użyje GeoIP z Twojego IP.",
@@ -163,6 +180,7 @@
       "no_native_left": "Wszystkie encje natywne są już zmapowane.",
       "no_feeds": "Nic jeszcze nie zmapowano.",
       "no_gets": "Żaden node nie jest jeszcze podglądany.",
+      "no_gateways": "Na tym koncie nie ma jeszcze bram LoRaWAN — sparuj bramę w aplikacji Sensmos.",
       "subscribe_ok": "✅ Zasubskrybowano! Nowe sensory pojawią się wkrótce.",
       "subscribe_failed": "Subskrypcja nieudana.",
       "insufficient_balance": "Za mało GALU na pierwszą dobę subskrypcji."

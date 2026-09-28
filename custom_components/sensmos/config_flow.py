@@ -11,7 +11,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
-from homeassistant.helpers import selector
+from homeassistant.helpers import device_registry as dr, selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import SensmosApi, SensmosApiError, SensmosAuthError
@@ -40,6 +40,7 @@ from .const import (
     MODE_DATA,
     MODE_NODE,
     OPT_FEEDS,
+    OPT_GATEWAYS,
     OPT_GET_INTERVAL,
     OPT_GETS,
     OPT_MAPPINGS,
@@ -54,6 +55,20 @@ from .units import device_classes_for_unit
 _ENTITY_RE = re.compile(r"^(pub|own)\.[a-z0-9_]+$")
 
 _SLUG = re.compile(r"[^a-z0-9_]+")
+
+
+def _pair_reason(err: str) -> str:
+    """Tekst błędu parowania (serwer / pairing.py) → klucz komunikatu w języku użytkownika."""
+    e = err.lower()
+    if e.startswith("connection:"):
+        return "cannot_connect_cloud"
+    if "expired" in e or "already been used" in e:
+        return "pair_expired"
+    if "too many pairings" in e:
+        return "pair_busy"
+    if "does not open" in e or "without token" in e:
+        return "pair_invalid"
+    return "pair_failed"
 
 
 def _slugify(name: str) -> str:
@@ -192,7 +207,7 @@ class SensmosConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self._pairing.offer(session, name, list(self._want))
             except PairingError as err:
                 return self.async_abort(
-                    reason="pair_failed", description_placeholders={"error": str(err)}
+                    reason=_pair_reason(str(err)), description_placeholders={"error": str(err)}
                 )
             self._pair_task = self.hass.async_create_task(self._pairing.wait(session))
         if not self._pair_task.done():
@@ -217,7 +232,8 @@ class SensmosConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._pair_error == "timeout":
             return self.async_abort(reason="pair_timeout")
         return self.async_abort(
-            reason="pair_failed", description_placeholders={"error": self._pair_error}
+            reason=_pair_reason(self._pair_error),
+            description_placeholders={"error": self._pair_error},
         )
 
     async def async_step_cloud_finish(self, user_input=None) -> Any:
@@ -257,11 +273,6 @@ class SensmosConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._pair_task is not None:
             self._pair_task.cancel()
 
-    @classmethod
-    @callback
-    def async_supports_options_flow(cls, config_entry: ConfigEntry) -> bool:
-        return config_entry.data.get(CONF_MODE) != MODE_CLOUD
-
     @staticmethod
     @callback
     def async_get_options_flow(entry: ConfigEntry) -> SensmosOptionsFlow:
@@ -275,6 +286,7 @@ class SensmosOptionsFlow(OptionsFlow):
         self._entry = entry
         self._pending_pub: dict[str, Any] = {}
         self._pending_sub: dict[str, Any] = {}
+        self._gw: tuple[str, str] | None = None   # (device_id Sensmos, nazwa) — tryb cloud
 
     # ── helpers ───────────────────────────────────────────────
 
@@ -296,6 +308,8 @@ class SensmosOptionsFlow(OptionsFlow):
     # ── menu ──────────────────────────────────────────────────
 
     async def async_step_init(self, user_input=None) -> Any:
+        if self._entry.data.get(CONF_MODE) == MODE_CLOUD:
+            return await self.async_step_gw_pick()
         if self._entry.data.get(CONF_MODE) == MODE_DATA:
             return self.async_show_menu(
                 step_id="init",
@@ -310,6 +324,69 @@ class SensmosOptionsFlow(OptionsFlow):
         return self.async_show_menu(
             step_id="init",
             menu_options=["feed_pub", "feed_own", "feed_remove", "subscribe", "settings"],
+        )
+
+    # ── tryb cloud: odbiór ramek przez bramę ─────────────────
+
+    def _gateways(self) -> dict[str, str]:
+        """device_id Sensmos → nazwa, z urządzeń tego wpisu (= bramy konta)."""
+        out: dict[str, str] = {}
+        for d in dr.async_entries_for_config_entry(dr.async_get(self.hass), self._entry.entry_id):
+            for ident in d.identifiers:
+                if ident[0] == DOMAIN:
+                    out[ident[1]] = d.name_by_user or d.name or ident[1][:8]
+        return out
+
+    async def async_step_gw_pick(self, user_input=None) -> Any:
+        gws = self._gateways()
+        if not gws:
+            return self.async_abort(reason="no_gateways")
+        if user_input is not None or len(gws) == 1:
+            gid = user_input["gateway"] if user_input else next(iter(gws))
+            self._gw = (gid, gws.get(gid, gid[:8]))
+            return await self.async_step_gw_rx()
+        return self.async_show_form(
+            step_id="gw_pick",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("gateway"): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                selector.SelectOptionDict(value=g, label=f"{n}  ({g[:8]})")
+                                for g, n in gws.items()
+                            ],
+                            mode=selector.SelectSelectorMode.LIST,
+                        )
+                    )
+                }
+            ),
+        )
+
+    async def async_step_gw_rx(self, user_input=None) -> Any:
+        gid, name = self._gw
+        all_gw = dict(self._entry.options.get(OPT_GATEWAYS) or {})
+        cur = all_gw.get(gid) or {}
+        if user_input is not None:
+            # Fraza BEZ przycinania — FW liczy sha256 z surowych bajtów; spacja na końcu to inny klucz.
+            phrase = user_input.get("passphrase") or ""
+            key = hashlib.sha256(phrase.encode("utf-8")).hexdigest() if phrase else cur.get("key")
+            all_gw[gid] = {"key": key, "open": bool(user_input.get("open"))}
+            return self.async_create_entry(data={**self._entry.options, OPT_GATEWAYS: all_gw})
+        return self.async_show_form(
+            step_id="gw_rx",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("passphrase"): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                    ),
+                    vol.Required("open", default=bool(cur.get("open"))): selector.BooleanSelector(),
+                }
+            ),
+            description_placeholders={
+                "name": name,
+                "id8": gid[:8],
+                "key_state": "✅" if cur.get("key") else "—",
+            },
         )
 
     # ── tryb data: mapowania encja HA → encja Sensmos ─────────

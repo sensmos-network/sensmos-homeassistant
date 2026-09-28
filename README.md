@@ -2,10 +2,11 @@
 
 # Sensmos — Home Assistant integration (HACS)
 
-Bring Sensmos into Home Assistant — two ways:
+Bring Sensmos into Home Assistant — three ways:
 
 - **🔌 Physical node** — connect a Sensmos ESP32 node on your LAN (HTTP API, **no cloud, no broker**): read its data in HA and feed HA data back to it.
 - **🟣 Data only** — no hardware: push selected Home Assistant sensors straight to the [live map](https://sensmos.com/map/) as a software node (purple). Pick a passkey, choose entities, done.
+- **☁️ Sensmos account** — your LoRaWAN gateways (e.g. Crankk) paired in the Sensmos app become devices in HA, and HA is their base: it receives your LoRa sensors' frames and decrypts them itself.
 
 > Sensmos is a DePIN sensor network: nodes publish data to a live map, earn GALU, and can subscribe to each other.
 
@@ -27,6 +28,18 @@ Bring Sensmos into Home Assistant — two ways:
 4. Pick a mode:
    - **🔌 Physical node** — enter the **node address** (IP from the Sensmos app, or `sensmos-xxxxxx.local`) and the **PIN**.
    - **🟣 Data only** — enter a **passkey** (≥32 chars; this is your node's identity), optionally a label and lat/lon. Then open **Configure** to choose which HA sensors to publish.
+   - **☁️ Sensmos account** — HA shows a 12-character code; in the Sensmos app open **Settings → Paired devices → Pair** and enter it.
+
+## Sensmos account mode (your LoRaWAN gateways)
+
+For LoRaWAN gateways that forward to `sensmos.com:1700` and are paired with your wallet in the Sensmos app (Dashboard → **+** → *Add LoRaWAN gateway (e.g. Crankk)*).
+
+- **Pairing without a wallet in HA** — the app issues a revocable token (scopes `lora.rx`, `lora.tx`) and hands it over sealed with the code shown in HA; the server never sees the code. Revoke it in the app and HA asks you to pair again.
+- **Gateways as devices** — every gateway on the account appears as a device; one paired or unpaired in the app appears or disappears here on its own.
+- **Your sensors' frames** — a LoRa sensor sends DATA frames to the gateway's Sensmos ID (id8). The server passes each frame on exactly as the sensor sent it and HA decrypts it itself, like a node base: a **LoRa frame sub N** sensor per sensor sub-address, the `sensmos_lora_frame` event and a logbook line. The last frames are kept on disk, so the sensors come back after a restart.
+- **Per-gateway options** (Configure): the **Key phrase** your sensors use (only its SHA-256 is stored) and **Also accept plain frames** (off by default).
+- **Diagnostics** — Online, Beacons sent, Last beacon, Sensmos beacons heard (24 h), Nodes heard (24 h), Heard by nodes (24 h); they turn unavailable after 3 minutes without an update from the server.
+- If HA is offline, frames addressed to the gateway are dropped (same as an offline node). Reception is billed like a node base (Wallet → Service expenses). Transmitting through the gateway is not available in this mode.
 
 ## Data-only mode (push HA sensors to the map)
 
@@ -124,8 +137,8 @@ Frame reception uses a key phrase that never leaves the node (set it in the app:
 
 ## Requirements
 
-- A Sensmos node on the same network (firmware with the HTTP API).
-- Home Assistant 2024.6+.
+- A Sensmos node on the same network (firmware with the HTTP API) — or, for the Sensmos account mode, a LoRaWAN gateway paired in the Sensmos app.
+- Home Assistant 2024.12+.
 
 ## Part of the Sensmos project
 

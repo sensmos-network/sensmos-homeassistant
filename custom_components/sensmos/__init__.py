@@ -12,10 +12,12 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.storage import Store
 
 from .api import SensmosApi, SensmosApiError, SensmosAuthError
 from .cloud import CloudAuthError, CloudConnectError, SensmosCloud
 from .const import (
+    CLOUD_PLATFORMS,
     CONF_HOST,
     CONF_KEY,
     CONF_MODE,
@@ -29,7 +31,7 @@ from .const import (
     PLATFORMS,
     telemetry_key,
 )
-from .coordinator import SensmosCoordinator
+from .coordinator import GatewayCoordinator, SensmosCoordinator
 from .direct import SensmosDirect
 from .feeder import Feeder
 from .get import SensmosGet
@@ -99,16 +101,53 @@ def _sync_gateways(hass: HomeAssistant, entry: ConfigEntry, gateways: list[dict]
             dev_reg.async_remove_device(device.id)
 
 
+def _cloud_store(hass: HomeAssistant, entry: ConfigEntry) -> Store:
+    return Store(hass, 1, f"{DOMAIN}.cloud_{entry.entry_id}")
+
+
 async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Tryb 'cloud' — konto Sensmos tokenem; HA jest „mózgiem" sparowanych bram (§10)."""
-    cloud = SensmosCloud(hass, entry, lambda gws: _sync_gateways(hass, entry, gws))
+    store = _cloud_store(hass, entry)
+    saved = await store.async_load() or {}
+    coords: dict[str, GatewayCoordinator] = {}
+    ready = False
+
+    def on_gateways(gws: list[dict]) -> None:
+        _sync_gateways(hass, entry, gws)
+        # nowa albo zdjęta brama → nowy komplet koordynatorów i encji
+        if ready and set(coords) != {g["device_id"] for g in gws}:
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+
+    def on_frame(m: dict) -> dict | None:
+        c = coords.get(str(m.get("gw") or "").lower())
+        return c.on_frame(m) if c else None
+
+    def on_stats(items: list) -> None:
+        for s in items:
+            c = coords.get(str(s.get("device_id") or "")) if isinstance(s, dict) else None
+            if c:
+                c.set_stats(s)
+
+    def save() -> None:
+        store.async_delay_save(lambda: {g: c.dump() for g, c in coords.items()}, 10)
+
+    cloud = SensmosCloud(hass, entry, on_gateways, on_frame, on_stats)
     try:
         await cloud.connect()
     except CloudAuthError as err:
         raise ConfigEntryAuthFailed(str(err)) from err
     except CloudConnectError as err:
         raise ConfigEntryNotReady(str(err)) from err
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"mode": MODE_CLOUD, "cloud": cloud}
+    for g in cloud.gateways:
+        coords[g["device_id"]] = GatewayCoordinator(hass, entry, g, saved.get(g["device_id"]), save)
+    ready = True
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "mode": MODE_CLOUD,
+        "cloud": cloud,
+        "coordinators": coords,
+        "store": store,
+    }
+    await hass.config_entries.async_forward_entry_setups(entry, CLOUD_PLATFORMS)
     entry.async_create_background_task(hass, cloud.run(), f"{DOMAIN}_cloud_{entry.entry_id}")
     return True
 
@@ -188,6 +227,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
+    # Brama konta wraca z listą z BE — usuwa się ją w apce (odparowanie), nie tutaj.
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}
+    if data.get("mode") == MODE_CLOUD:
+        return not any(
+            i[0] == DOMAIN and i[1] in data["coordinators"] for i in device_entry.identifiers
+        )
     return True
 
 
@@ -196,8 +241,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if data and data.get("mode") == MODE_CLOUD:
         await data["cloud"].close()
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-        return True
+        # zapis od razu — przy przeładowaniu nowy wpis czyta ring, zanim minie opóźnienie zapisu
+        await data["store"].async_save({g: c.dump() for g, c in data["coordinators"].items()})
+        ok = await hass.config_entries.async_unload_platforms(entry, CLOUD_PLATFORMS)
+        if ok:
+            hass.data[DOMAIN].pop(entry.entry_id, None)
+        return ok
 
     # tryb data — sender (direct) + sensory podglądu (DATA_PLATFORMS)
     if data and data.get("mode") == MODE_DATA:
@@ -216,6 +265,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Wpis usunięty — zapisane ramki bram (odszyfrowane) nie mogą zostać na dysku."""
+    if entry.data.get(CONF_MODE) == MODE_CLOUD:
+        await _cloud_store(hass, entry).async_remove()
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

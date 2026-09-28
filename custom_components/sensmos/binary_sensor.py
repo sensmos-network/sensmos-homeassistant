@@ -11,14 +11,20 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import SensmosCoordinator
+from .const import DOMAIN, MODE_CLOUD
+from .coordinator import GatewayCoordinator, SensmosCoordinator
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
+    if data.get("mode") == MODE_CLOUD:
+        async_add_entities(
+            GatewayOnlineSensor(c, DeviceInfo(identifiers={(DOMAIN, c.device_id)}))
+            for c in data["coordinators"].values()
+        )
+        return
     coordinator: SensmosCoordinator = data["coordinator"]
     device_info: DeviceInfo = data["device_info"]
     entities: list[BinarySensorEntity] = [
@@ -28,6 +34,27 @@ async def async_setup_entry(
     if coordinator.lora:
         entities.append(LoraEmergencySensor(coordinator, device_info))
     async_add_entities(entities)
+
+
+class GatewayOnlineSensor(CoordinatorEntity[GatewayCoordinator], BinarySensorEntity):
+    """Forwarder bramy odzywa się do BE (ostatnie 3 min) — z diagnostyki BE co 60 s."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_name = "Online"
+
+    def __init__(self, coordinator: GatewayCoordinator, device_info: DeviceInfo) -> None:
+        super().__init__(coordinator)
+        self._attr_device_info = device_info
+        self._attr_unique_id = f"{coordinator.device_id}_online"
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.stats_fresh
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.stats.get("online"))
 
 
 class LoraEmergencySensor(CoordinatorEntity[SensmosCoordinator], BinarySensorEntity):

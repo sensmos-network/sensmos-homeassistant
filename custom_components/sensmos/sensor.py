@@ -19,12 +19,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     ENTITY_GRACE_S,
+    MODE_CLOUD,
     MODE_DATA,
     OPT_FEEDS,
     POOL_EXCLUDED_PREFIXES,
     telemetry_key,
 )
-from .coordinator import SensmosCoordinator
+from .coordinator import GatewayCoordinator, SensmosCoordinator
 from .get import SensmosGet
 
 
@@ -36,6 +37,10 @@ async def async_setup_entry(
     # tryb data: sensory to podgląd (GET) opublikowanych encji innych nodów
     if data.get("mode") == MODE_DATA:
         await _setup_get_sensors(hass, entry, async_add_entities, data)
+        return
+    if data.get("mode") == MODE_CLOUD:
+        for coord in data["coordinators"].values():
+            _setup_gateway_sensors(entry, async_add_entities, coord)
         return
 
     coordinator: SensmosCoordinator = data["coordinator"]
@@ -97,6 +102,117 @@ async def async_setup_entry(
     async_add_entities(entities)
     _discover()
     entry.async_on_unload(coordinator.async_add_listener(_discover))
+
+
+def _setup_gateway_sensors(
+    entry: ConfigEntry, async_add_entities: AddEntitiesCallback, coord: GatewayCoordinator
+) -> None:
+    """Brama w trybie cloud: te same encje ramek co node-baza + diagnostyka z BE."""
+    info = DeviceInfo(identifiers={(DOMAIN, coord.device_id)})
+    async_add_entities(
+        [
+            GwBeaconsSensor(coord, info),
+            GwLastBeaconSensor(coord, info),
+            GwFramesSensor(coord, info),
+            GwHearsSensor(coord, info),
+            GwHeardBySensor(coord, info),
+        ]
+    )
+    known_subs: set[int] = set()
+
+    @callback
+    def _discover() -> None:
+        new: list[SensorEntity] = []
+        for fr in coord.lora_frames:
+            sub = int(fr.get("sub") or 0)
+            if sub in known_subs:
+                continue
+            known_subs.add(sub)
+            new.append(LoraFrameSensor(coord, info, sub))
+        if new:
+            async_add_entities(new)
+
+    _discover()
+    entry.async_on_unload(coord.async_add_listener(_discover))
+
+
+class _GwStat(CoordinatorEntity[GatewayCoordinator], SensorEntity):
+    """Diagnostyka bramy z BE (co 60 s) — to samo, co karta bramy w apce."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _key = ""
+
+    def __init__(self, coordinator: GatewayCoordinator, device_info: DeviceInfo) -> None:
+        super().__init__(coordinator)
+        self._attr_device_info = device_info
+        self._attr_unique_id = f"{coordinator.device_id}_gw_{self._key}"
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.stats_fresh
+
+
+class GwBeaconsSensor(_GwStat):
+    """Beacony Sensmos nadane przez bramę (licznik BE — zeruje się przy restarcie serwera)."""
+
+    _key = "beacons"
+    _attr_name = "Beacons sent"
+    _attr_icon = "mdi:broadcast"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.stats.get("beacons")
+
+
+class GwLastBeaconSensor(_GwStat):
+    _key = "last_beacon"
+    _attr_name = "Last beacon"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    @property
+    def native_value(self):
+        return self.coordinator.last_beacon
+
+
+class GwFramesSensor(_GwStat):
+    """Beacony Sensmos usłyszane przez bramę w 24 h (BE liczy lora_frames; DATA idzie do bazy, nie tu)."""
+
+    _key = "frames_24h"
+    _attr_name = "Sensmos beacons heard (24 h)"
+    _attr_icon = "mdi:radio-tower"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.stats.get("frames_24h")
+
+
+class GwHearsSensor(_GwStat):
+    """Ile nodów brama słyszy (24 h)."""
+
+    _key = "hears"
+    _attr_name = "Nodes heard (24 h)"
+    _attr_icon = "mdi:ear-hearing"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.stats.get("hears")
+
+
+class GwHeardBySensor(_GwStat):
+    """Ile nodów słyszy bramę (24 h)."""
+
+    _key = "heard_by"
+    _attr_name = "Heard by nodes (24 h)"
+    _attr_icon = "mdi:access-point"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.stats.get("heard_by")
 
 
 async def _setup_get_sensors(
@@ -379,7 +495,10 @@ class LoraFrameSensor(_Base):
         fr = self._current()
         if fr is None:
             return None
-        return fr.get("text") if fr.get("text") is not None else fr.get("hex")
+        v = fr.get("text") if fr.get("text") is not None else fr.get("hex")
+        # 128 B binarnie = 256 znaków hex, a HA przyjmuje stan ≤255 (inaczej „unknown" i błąd
+        # w logu). Pełny hex zostaje w atrybucie `hex`.
+        return v[:254] + "…" if v and len(v) > 255 else v
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

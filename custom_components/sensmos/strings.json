@@ -41,7 +41,7 @@
       }
     },
     "progress": {
-      "wait_phone": "In the Sensmos app open **Settings → Paired devices → Pair a device** and enter the code:\n\n## {code}\n\nThe code is valid for 3 minutes."
+      "wait_phone": "In the Sensmos app open **Settings → Paired devices → Pair** and enter the code:\n\n## {code}\n\nThe code is valid for 3 minutes."
     },
     "error": {
       "invalid_pin": "Wrong PIN.",
@@ -51,6 +51,11 @@
     "abort": {
       "already_configured": "This node or account is already configured.",
       "pair_failed": "Pairing failed: {error}",
+      "pair_expired": "The code has expired or was already used. Try again.",
+      "pair_busy": "Too many pairings in progress — try again in a minute.",
+      "pair_invalid": "The app's reply could not be read — pair again with a new code.",
+      "cannot_connect_cloud": "Cannot reach the Sensmos server. Check the internet connection and try again.",
+      "already_in_progress": "Setup for this node or account is already in progress.",
       "pair_timeout": "3 minutes passed without the code being entered in the app. Try again.",
       "wrong_account": "This is a different account than the one paired before. Add it as a new entry.",
       "reauth_successful": "Paired again.",
@@ -139,6 +144,18 @@
         "title": "Stop previewing",
         "data": { "remove": "Nodes to stop previewing" }
       },
+      "gw_pick": {
+        "title": "Pick a gateway",
+        "data": { "gateway": "LoRaWAN gateway" }
+      },
+      "gw_rx": {
+        "title": "{name} ({id8}) — receiving LoRa frames",
+        "description": "Frames your sensors send to this gateway (address **{id8}**) are decrypted here, in Home Assistant — the server only passes them on. Use the same key phrase as in your sensors. Only its SHA-256 (the key) is stored. Key set: {key_state}. Leave the field empty to keep the current key.",
+        "data": {
+          "passphrase": "Key phrase",
+          "open": "Also accept plain frames (no encryption) — billed as plain frame receive"
+        }
+      },
       "data_settings": {
         "title": "Data settings",
         "description": "Location is optional — without it the server uses GeoIP from your IP.",
@@ -163,6 +180,7 @@
       "no_native_left": "All native entities are already mapped.",
       "no_feeds": "Nothing mapped yet.",
       "no_gets": "No nodes are being previewed yet.",
+      "no_gateways": "No LoRaWAN gateways on this account yet — pair one in the Sensmos app.",
       "subscribe_ok": "✅ Subscribed! New sensors will appear shortly.",
       "subscribe_failed": "Subscription failed.",
       "insufficient_balance": "Not enough GALU for the first day of the subscription."
