@@ -116,6 +116,8 @@ EVENT_MESSAGE = "sensmos_message"
 # odpytywane w cyklu koordynatora — bez zabierania webhooka noda (to slot usera).
 EVENT_LORA_CMD = "sensmos_lora_cmd"
 EVENT_LORA_FRAME = "sensmos_lora_frame"
+# Wiadomość z urządzenia sparowanego z kontem (np. komunikator: „kod:ALARM”) — tryb chmury.
+EVENT_DEVICE_MESSAGE = "sensmos_device_message"
 
 PLATFORMS = ["sensor", "binary_sensor"]
 CLOUD_PLATFORMS = ["sensor", "binary_sensor"]

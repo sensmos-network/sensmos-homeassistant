@@ -17,7 +17,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_BE, CONF_TOKEN
+from .const import CONF_BE, CONF_TOKEN, EVENT_DEVICE_MESSAGE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -140,6 +140,25 @@ class SensmosCloud:
             self._on_stats(m.get("gateways") or [])
         elif t == "gateways":
             self._set_gateways(m.get("gateways") or [])
+        elif t == "ldev_msg":
+            self._on_device_message(m)
+
+    def _on_device_message(self, m: dict[str, Any]) -> None:
+        """Urządzenie sparowane z kontem (np. komunikator) wysłało tekst — do automatyzacji."""
+        dev, text = m.get("dev"), m.get("text")
+        if not isinstance(dev, str) or not isinstance(text, str):
+            return
+        name = m.get("name")
+        self.hass.bus.async_fire(EVENT_DEVICE_MESSAGE, {
+            "device": dev[:8],
+            "name": name[:32] if isinstance(name, str) else None,
+            "text": text[:200],
+            "alert": bool(m.get("alert")),
+            "rx": str(m.get("rx") or "")[:8],
+            "rssi": m.get("rssi"),
+            "snr": m.get("snr"),
+            "ts": m.get("ts"),
+        })
 
     def _set_gateways(self, gws: list[Any]) -> None:
         self.gateways = [g for g in gws if isinstance(g, dict) and g.get("device_id")]

@@ -39,6 +39,7 @@ For LoRaWAN gateways that forward to `sensmos.com:1700` and are paired with your
 - **Your sensors' frames** — a LoRa sensor sends DATA frames to the gateway's Sensmos ID (id8). The server passes each frame on exactly as the sensor sent it and HA decrypts it itself, like a node base: a **LoRa frame sub N** sensor per sensor sub-address, the `sensmos_lora_frame` event and a logbook line. The last frames are kept on disk, so the sensors come back after a restart.
 - **Per-gateway options** (Configure): the **Key phrase** your sensors use (only its SHA-256 is stored) and **Also accept plain frames** (off by default).
 - **Diagnostics** — Online, Beacons sent, Last beacon, Sensmos beacons heard (24 h), Nodes heard (24 h), Heard by nodes (24 h); they turn unavailable after 3 minutes without an update from the server.
+- **Messages from your LoRa devices** — a device (e.g. the Sensmos messenger) paired with your wallet in the app (Dashboard → **+** → *Add LoRa device*) sends short texts to your account; any Sensmos node or gateway in range carries them and HA fires `sensmos_device_message` with `{device, name, text, alert, rx, rssi, snr, ts}`. No gateway ID or key phrase to set up.
 - If HA is offline, frames addressed to the gateway are dropped (same as an offline node). Reception is billed like a node base (Wallet → Service expenses). Transmitting through the gateway is not available in this mode.
 
 ## Data-only mode (push HA sensors to the map)
@@ -70,6 +71,20 @@ Settings → Devices & Services → Sensmos → **Configure**:
 **Configure → 📡 Subscribe to another node**: enter the device ID, a local prefix (e.g. `neighbor`), and a number of days. You'll see the available entities and the cost; after confirming, data shows up in HA as `neighbor_*` sensors. Billed daily in GALU from the wallet pool.
 
 ## Events
+
+```yaml
+# Automation: a message from your paired LoRa device (Sensmos account mode)
+trigger:
+  - platform: event
+    event_type: sensmos_device_message
+condition:
+  - condition: template
+    value_template: "{{ 'kod:ALARM' in trigger.event.data.text }}"
+action:
+  - service: notify.mobile_app
+    data:
+      message: "{{ trigger.event.data.name or trigger.event.data.device }}: {{ trigger.event.data.text }}"
+```
 
 ```yaml
 # Automation triggered by a message received by the node
