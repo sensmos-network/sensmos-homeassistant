@@ -30,7 +30,7 @@ from .const import (
 )
 from .coordinator import GatewayCoordinator, SensmosCoordinator
 from .get import SensmosGet
-from .ldev import ldev_device_info, ldev_key, ldev_signal
+from .ldev import gw_msg_signal, ldev_device_info, ldev_key, ldev_signal
 
 
 async def async_setup_entry(
@@ -116,6 +116,7 @@ def _setup_gateway_sensors(
     info = DeviceInfo(identifiers={(DOMAIN, coord.device_id)})
     async_add_entities(
         [
+            GwLastMessageSensor(entry, coord.device_id, info),
             GwBeaconsSensor(coord, info),
             GwLastBeaconSensor(coord, info),
             GwFramesSensor(coord, info),
@@ -600,5 +601,42 @@ class LdevLastMessageSensor(RestoreEntity, SensorEntity):
             "via": m.get("rx"),
             "rssi": m.get("rssi"),
             "snr": m.get("snr"),
+        }
+        self.async_write_ha_state()
+
+
+class GwLastMessageSensor(RestoreEntity, SensorEntity):
+    """Ostatnia wiadomość z Twojego urządzenia LoRa, którą słyszy ta brama — na karcie bramy."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "gw_last_message"
+    _attr_icon = "mdi:message-text"
+
+    def __init__(self, entry: ConfigEntry, gw_device_id: str, info: DeviceInfo) -> None:
+        self._entry_id = entry.entry_id
+        self._gw = gw_device_id
+        self._attr_unique_id = f"{gw_device_id}_gw_last_message"
+        self._attr_device_info = info
+        self._attr_native_value = None
+        self._attr_extra_state_attributes = {}
+
+    async def async_added_to_hass(self) -> None:
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in ("unknown", "unavailable"):
+            self._attr_native_value = last.state
+            self._attr_extra_state_attributes = dict(last.attributes)
+        self.async_on_remove(async_dispatcher_connect(
+            self.hass, gw_msg_signal(self._entry_id, self._gw), self._on_msg))
+
+    @callback
+    def _on_msg(self, m: dict[str, Any]) -> None:
+        text = m.get("text") or ""
+        self._attr_native_value = text if len(text) <= 255 else text[:254] + "…"
+        ts = m.get("ts")
+        self._attr_extra_state_attributes = {
+            "from": m.get("name") or f"LoRa {m.get('device', '')}",
+            "device": m.get("device"),
+            "received_at": dt_util.utc_from_timestamp(ts).isoformat() if isinstance(ts, (int, float)) else dt_util.utcnow().isoformat(),
+            "alert": bool(m.get("alert")),
         }
         self.async_write_ha_state()

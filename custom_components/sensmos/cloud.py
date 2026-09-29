@@ -170,6 +170,7 @@ class SensmosCloud:
             "rssi": m.get("rssi"),
             "snr": m.get("snr"),
             "ts": m.get("ts"),
+            "gws": [g for g in (m.get("gws") or []) if isinstance(g, str) and len(g) == 64],
         })
 
     def _set_ldevs(self, items: list[Any]) -> None:

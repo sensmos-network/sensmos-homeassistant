@@ -37,7 +37,7 @@ from .coordinator import GatewayCoordinator, SensmosCoordinator
 from .direct import SensmosDirect
 from .feeder import Feeder
 from .get import SensmosGet
-from .ldev import ldev_device_info, ldev_key, ldev_signal
+from .ldev import gw_msg_signal, ldev_device_info, ldev_key, ldev_signal
 from .webhook import async_remove_node_webhook, async_setup_node_webhook
 
 _LOGGER = logging.getLogger(__name__)
@@ -138,6 +138,8 @@ async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> b
                     if key in d.identifiers), None)
         hass.bus.async_fire(EVENT_DEVICE_MESSAGE, {**m, "device_id": dev.id if dev else None})
         async_dispatcher_send(hass, ldev_signal(entry.entry_id, m["device"]), m)
+        for gw in m.get("gws") or []:
+            async_dispatcher_send(hass, gw_msg_signal(entry.entry_id, gw), m)
 
     def on_frame(m: dict) -> dict | None:
         c = coords.get(str(m.get("gw") or "").lower())

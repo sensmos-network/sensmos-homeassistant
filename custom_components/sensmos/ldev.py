@@ -21,6 +21,10 @@ def ldev_signal(entry_id: str, id8: str) -> str:
     return f"{DOMAIN}_ldev_{entry_id}_{id8}"
 
 
+def gw_msg_signal(entry_id: str, gw_device_id: str) -> str:
+    return f"{DOMAIN}_gwmsg_{entry_id}_{gw_device_id}"
+
+
 def ldev_device_info(d: dict[str, Any]) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, ldev_key(d["id8"]))},

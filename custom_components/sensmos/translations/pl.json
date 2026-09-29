@@ -187,7 +187,7 @@
     }
   },
   "entity": {
-    "sensor": { "ldev_last_message": { "name": "Ostatnia wiadomość" } },
+    "sensor": { "ldev_last_message": { "name": "Ostatnia wiadomość" }, "gw_last_message": { "name": "Ostatnia wiadomość" } },
     "event": {
       "ldev_message": {
         "name": "Wiadomość",
