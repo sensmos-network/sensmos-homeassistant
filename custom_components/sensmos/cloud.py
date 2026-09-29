@@ -17,7 +17,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_BE, CONF_TOKEN, EVENT_DEVICE_MESSAGE
+from .const import CONF_BE, CONF_TOKEN
+from .ldev import clean_ldevs
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,17 +43,22 @@ class SensmosCloud:
         on_gateways: Callable[[list[dict[str, Any]]], None],
         on_frame: Callable[[dict[str, Any]], dict[str, Any] | None],
         on_stats: Callable[[list[Any]], None],
+        on_ldevs: Callable[[list[dict[str, Any]]], None] | None = None,
+        on_ldev_msg: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.hass = hass
         self.entry = entry
         self._on_gateways = on_gateways
         self._on_frame = on_frame
         self._on_stats = on_stats
+        self._on_ldevs = on_ldevs
+        self._on_ldev_msg = on_ldev_msg
         be = entry.data[CONF_BE].rstrip("/")
         self._url = be.replace("https://", "wss://", 1).replace("http://", "ws://", 1) + "/v1/term"
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._closing = False
         self.gateways: list[dict[str, Any]] = []
+        self.ldevs: list[dict[str, Any]] = []
 
     async def connect(self) -> None:
         session = async_get_clientsession(self.hass)
@@ -71,7 +77,9 @@ class SensmosCloud:
                 pass
         if m.get("type") == "auth" and m.get("ok") is True:
             self._ws = ws
+            self.ldevs = clean_ldevs(m.get("ldevs") or [])
             self._set_gateways(m.get("gateways") or [])
+            self._set_ldevs(m.get("ldevs") or [])
             return
         await ws.close()
         err = str(m.get("error") or "no auth reply")
@@ -140,6 +148,8 @@ class SensmosCloud:
             self._on_stats(m.get("gateways") or [])
         elif t == "gateways":
             self._set_gateways(m.get("gateways") or [])
+        elif t == "ldevs":
+            self._set_ldevs(m.get("ldevs") or [])
         elif t == "ldev_msg":
             self._on_device_message(m)
 
@@ -149,8 +159,10 @@ class SensmosCloud:
         if not isinstance(dev, str) or not isinstance(text, str):
             return
         name = m.get("name")
-        self.hass.bus.async_fire(EVENT_DEVICE_MESSAGE, {
-            "device": dev[:8],
+        if self._on_ldev_msg is None:
+            return
+        self._on_ldev_msg({
+            "device": dev[:8].lower(),
             "name": name[:32] if isinstance(name, str) else None,
             "text": text[:200],
             "alert": bool(m.get("alert")),
@@ -159,6 +171,11 @@ class SensmosCloud:
             "snr": m.get("snr"),
             "ts": m.get("ts"),
         })
+
+    def _set_ldevs(self, items: list[Any]) -> None:
+        self.ldevs = clean_ldevs(items)
+        if self._on_ldevs is not None:
+            self._on_ldevs(self.ldevs)
 
     def _set_gateways(self, gws: list[Any]) -> None:
         self.gateways = [g for g in gws if isinstance(g, dict) and g.get("device_id")]

@@ -13,7 +13,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -27,6 +30,7 @@ from .const import (
 )
 from .coordinator import GatewayCoordinator, SensmosCoordinator
 from .get import SensmosGet
+from .ldev import ldev_device_info, ldev_key, ldev_signal
 
 
 async def async_setup_entry(
@@ -41,6 +45,7 @@ async def async_setup_entry(
     if data.get("mode") == MODE_CLOUD:
         for coord in data["coordinators"].values():
             _setup_gateway_sensors(entry, async_add_entities, coord)
+        async_add_entities(LdevLastMessageSensor(entry, d) for d in data.get("ldevs", []))
         return
 
     coordinator: SensmosCoordinator = data["coordinator"]
@@ -559,3 +564,41 @@ class UptimeSensor(_Base):
     def native_value(self) -> int | None:
         status = (self.coordinator.data or {}).get("status") or {}
         return status.get("uptime_s")
+
+
+class LdevLastMessageSensor(RestoreEntity, SensorEntity):
+    """Treść ostatniej wiadomości z urządzenia LoRa sparowanego z kontem (np. „kod:ALARM”)."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "ldev_last_message"
+    _attr_icon = "mdi:message-text"
+
+    def __init__(self, entry: ConfigEntry, d: dict[str, Any]) -> None:
+        self._entry_id = entry.entry_id
+        self._id8 = d["id8"]
+        self._attr_unique_id = f"{ldev_key(self._id8)}_last_message"
+        self._attr_device_info = ldev_device_info(d)
+        self._attr_native_value = None
+        self._attr_extra_state_attributes = {}
+
+    async def async_added_to_hass(self) -> None:
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in ("unknown", "unavailable"):
+            self._attr_native_value = last.state
+            self._attr_extra_state_attributes = dict(last.attributes)
+        self.async_on_remove(async_dispatcher_connect(
+            self.hass, ldev_signal(self._entry_id, self._id8), self._on_msg))
+
+    @callback
+    def _on_msg(self, m: dict[str, Any]) -> None:
+        text = m.get("text") or ""
+        self._attr_native_value = text if len(text) <= 255 else text[:254] + "…"
+        ts = m.get("ts")
+        self._attr_extra_state_attributes = {
+            "received_at": dt_util.utc_from_timestamp(ts).isoformat() if isinstance(ts, (int, float)) else dt_util.utcnow().isoformat(),
+            "alert": bool(m.get("alert")),
+            "via": m.get("rx"),
+            "rssi": m.get("rssi"),
+            "snr": m.get("snr"),
+        }
+        self.async_write_ha_state()

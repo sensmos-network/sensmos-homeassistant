@@ -185,5 +185,14 @@
       "subscribe_failed": "Subskrypcja nieudana.",
       "insufficient_balance": "Za mało GALU na pierwszą dobę subskrypcji."
     }
+  },
+  "entity": {
+    "sensor": { "ldev_last_message": { "name": "Ostatnia wiadomość" } },
+    "event": {
+      "ldev_message": {
+        "name": "Wiadomość",
+        "state_attributes": { "event_type": { "state": { "message": "Wiadomość", "alert": "Alarm" } } }
+      }
+    }
   }
 }

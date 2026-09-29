@@ -185,5 +185,14 @@
       "subscribe_failed": "Subscription failed.",
       "insufficient_balance": "Not enough GALU for the first day of the subscription."
     }
+  },
+  "entity": {
+    "sensor": { "ldev_last_message": { "name": "Last message" } },
+    "event": {
+      "ldev_message": {
+        "name": "Message",
+        "state_attributes": { "event_type": { "state": { "message": "Message", "alert": "Alert" } } }
+      }
+    }
   }
 }

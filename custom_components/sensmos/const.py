@@ -120,5 +120,5 @@ EVENT_LORA_FRAME = "sensmos_lora_frame"
 EVENT_DEVICE_MESSAGE = "sensmos_device_message"
 
 PLATFORMS = ["sensor", "binary_sensor"]
-CLOUD_PLATFORMS = ["sensor", "binary_sensor"]
+CLOUD_PLATFORMS = ["sensor", "binary_sensor", "event"]
 DATA_PLATFORMS = ["sensor"]   # tryb data: tylko sensory (podgląd GET)

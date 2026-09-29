@@ -10,7 +10,7 @@ from collections.abc import Callable
 from homeassistant.components.logbook import LOGBOOK_ENTRY_MESSAGE, LOGBOOK_ENTRY_NAME
 from homeassistant.core import Event, HomeAssistant, callback
 
-from .const import DOMAIN, EVENT_LORA_CMD, EVENT_LORA_FRAME
+from .const import DOMAIN, EVENT_DEVICE_MESSAGE, EVENT_LORA_CMD, EVENT_LORA_FRAME
 
 
 @callback
@@ -40,5 +40,15 @@ def async_describe_events(
             LOGBOOK_ENTRY_MESSAGE: f"received: {event.data.get('cmd', '')}",
         }
 
+    @callback
+    def describe_device_message(event: Event) -> dict[str, str]:
+        d = event.data
+        text = f"„{d.get('text', '')}”"
+        return {
+            LOGBOOK_ENTRY_NAME: d.get("name") or f"LoRa {d.get('device', '')}",
+            LOGBOOK_ENTRY_MESSAGE: f"🚨 {text}" if d.get("alert") else text,
+        }
+
     async_describe_event(DOMAIN, EVENT_LORA_FRAME, describe_frame)
+    async_describe_event(DOMAIN, EVENT_DEVICE_MESSAGE, describe_device_message)
     async_describe_event(DOMAIN, EVENT_LORA_CMD, describe_cmd)
