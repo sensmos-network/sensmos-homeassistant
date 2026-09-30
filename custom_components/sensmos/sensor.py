@@ -12,6 +12,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -30,7 +31,7 @@ from .const import (
 )
 from .coordinator import GatewayCoordinator, SensmosCoordinator
 from .get import SensmosGet
-from .ldev import gw_msg_signal, ldev_device_info, ldev_key, ldev_signal
+from .ldev import account_device_info, account_key, msg_signal
 
 
 async def async_setup_entry(
@@ -44,8 +45,8 @@ async def async_setup_entry(
         return
     if data.get("mode") == MODE_CLOUD:
         for coord in data["coordinators"].values():
-            _setup_gateway_sensors(entry, async_add_entities, coord)
-        async_add_entities(LdevLastMessageSensor(entry, d) for d in data.get("ldevs", []))
+            _setup_gateway_sensors(hass, entry, async_add_entities, coord)
+        async_add_entities([AccountLastMessageSensor(entry)])
         return
 
     coordinator: SensmosCoordinator = data["coordinator"]
@@ -63,7 +64,6 @@ async def async_setup_entry(
 
     known: set[str] = set()
     known_mon: set[str] = set()   # osobno: kluczem jest goły klucz telemetrii, nie eid
-    known_subs: set[int] = set()  # LoRa: sensor per pod-adres (sub) widziany w inboxie
     # Encje karmione z HA TEŻ pokazujemy (echo: user widzi, co node realnie publikuje —
     # weryfikacja end-to-end). Pętlę HA→node→HA tnie guard w feederze (źródło z domeny
     # sensmos = odmowa), nie ukrywanie sensora.
@@ -93,30 +93,52 @@ async def async_setup_entry(
                 continue
             known.add(eid)
             new.append(NodeEntitySensor(coordinator, device_info, eid, fed=eid in fed))
-        # ramki LoRa: jeden sensor na pod-adres (sub 0 = node-baza, 1..255 = czujniki)
-        if coordinator.lora:
-            for fr in coordinator.lora_frames:
-                sub = int(fr.get("sub") or 0)
-                if sub in known_subs:
-                    continue
-                known_subs.add(sub)
-                new.append(LoraFrameSensor(coordinator, device_info, sub))
         if new:
             async_add_entities(new)
 
     async_add_entities(entities)
     _discover()
     entry.async_on_unload(coordinator.async_add_listener(_discover))
+    # ramki DATA: jeden sensor na pod-adres (sub 0 = node-baza, 1..255 = czujniki)
+    if coordinator.lora:
+        _setup_frame_sensors(hass, entry, async_add_entities, coordinator, device_info)
+
+
+def _setup_frame_sensors(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback,
+    coord: SensmosCoordinator | GatewayCoordinator, info: DeviceInfo,
+) -> None:
+    """Sensor na każdy sub obecny na liście ramek. Sub, którego na liście już nie ma, znika z HA
+    razem z wpisem w rejestrze — zamiast wisieć jako „niedostępny” albo trzymać starą treść."""
+    ent_reg = er.async_get(hass)
+    prefix = f"{coord.device_id}_lora_frame_"
+    live: set[int] = set()
+
+    @callback
+    def _sync() -> None:
+        subs = {int(fr.get("sub") or 0) for fr in coord.lora_frames}
+        for e in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+            tail = e.unique_id[len(prefix):] if e.unique_id.startswith(prefix) else ""
+            if tail.isdigit() and int(tail) not in subs:
+                ent_reg.async_remove(e.entity_id)
+        live.intersection_update(subs)
+        new = sorted(subs - live)
+        live.update(new)
+        if new:
+            async_add_entities(LoraFrameSensor(coord, info, sub) for sub in new)
+
+    _sync()
+    entry.async_on_unload(coord.async_add_listener(_sync))
 
 
 def _setup_gateway_sensors(
-    entry: ConfigEntry, async_add_entities: AddEntitiesCallback, coord: GatewayCoordinator
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback,
+    coord: GatewayCoordinator,
 ) -> None:
     """Brama w trybie cloud: te same encje ramek co node-baza + diagnostyka z BE."""
     info = DeviceInfo(identifiers={(DOMAIN, coord.device_id)})
     async_add_entities(
         [
-            GwLastMessageSensor(entry, coord.device_id, info),
             GwBeaconsSensor(coord, info),
             GwLastBeaconSensor(coord, info),
             GwFramesSensor(coord, info),
@@ -124,22 +146,7 @@ def _setup_gateway_sensors(
             GwHeardBySensor(coord, info),
         ]
     )
-    known_subs: set[int] = set()
-
-    @callback
-    def _discover() -> None:
-        new: list[SensorEntity] = []
-        for fr in coord.lora_frames:
-            sub = int(fr.get("sub") or 0)
-            if sub in known_subs:
-                continue
-            known_subs.add(sub)
-            new.append(LoraFrameSensor(coord, info, sub))
-        if new:
-            async_add_entities(new)
-
-    _discover()
-    entry.async_on_unload(coord.async_add_listener(_discover))
+    _setup_frame_sensors(hass, entry, async_add_entities, coord, info)
 
 
 class _GwStat(CoordinatorEntity[GatewayCoordinator], SensorEntity):
@@ -474,8 +481,8 @@ class LoraLastCommandSensor(_Base):
 class LoraFrameSensor(_Base):
     """Ostatnia ramka DATA dla danego pod-adresu (sub). Stan = treść (tekst lub hex).
 
-    Ring inboxu noda ma 6 wpisów — gdy ramkę tego sub wyprą inne, sensor trzyma
-    ostatnią znaną wartość (sticky), zamiast migać na unavailable.
+    Istnieje tylko, dopóki ramka tego sub jest na liście (ring inboxu noda ma 6 wpisów) —
+    potem znika z HA (_setup_frame_sensors).
     """
 
     _attr_icon = "mdi:radio-tower"
@@ -486,15 +493,13 @@ class LoraFrameSensor(_Base):
         super().__init__(coordinator, device_info)
         self._sub = sub
         self._attr_unique_id = f"{coordinator.device_id}_lora_frame_{sub}"
-        self._attr_name = "LoRa frame" if sub == 0 else f"LoRa frame sub {sub}"
-        self._cached: dict[str, Any] | None = None
+        self._attr_name = "LoRa DATA frame" if sub == 0 else f"LoRa DATA frame sub {sub}"
 
     def _current(self) -> dict[str, Any] | None:
         for fr in reversed(self.coordinator.lora_frames):
             if int(fr.get("sub") or 0) == self._sub:
-                self._cached = fr
                 return fr
-        return self._cached
+        return None
 
     @property
     def native_value(self) -> str | None:
@@ -567,18 +572,17 @@ class UptimeSensor(_Base):
         return status.get("uptime_s")
 
 
-class LdevLastMessageSensor(RestoreEntity, SensorEntity):
-    """Treść ostatniej wiadomości z urządzenia LoRa sparowanego z kontem (np. „kod:ALARM”)."""
+class AccountLastMessageSensor(RestoreEntity, SensorEntity):
+    """Treść ostatniej wiadomości z któregokolwiek urządzenia konta (np. „kod:ALARM”) — karta konta."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "ldev_last_message"
     _attr_icon = "mdi:message-text"
 
-    def __init__(self, entry: ConfigEntry, d: dict[str, Any]) -> None:
+    def __init__(self, entry: ConfigEntry) -> None:
         self._entry_id = entry.entry_id
-        self._id8 = d["id8"]
-        self._attr_unique_id = f"{ldev_key(self._id8)}_last_message"
-        self._attr_device_info = ldev_device_info(d)
+        self._attr_unique_id = f"{account_key(entry)}_last_message"
+        self._attr_device_info = account_device_info(entry)
         self._attr_native_value = None
         self._attr_extra_state_attributes = {}
 
@@ -587,46 +591,7 @@ class LdevLastMessageSensor(RestoreEntity, SensorEntity):
         if last is not None and last.state not in ("unknown", "unavailable"):
             self._attr_native_value = last.state
             self._attr_extra_state_attributes = dict(last.attributes)
-        self.async_on_remove(async_dispatcher_connect(
-            self.hass, ldev_signal(self._entry_id, self._id8), self._on_msg))
-
-    @callback
-    def _on_msg(self, m: dict[str, Any]) -> None:
-        text = m.get("text") or ""
-        self._attr_native_value = text if len(text) <= 255 else text[:254] + "…"
-        ts = m.get("ts")
-        self._attr_extra_state_attributes = {
-            "received_at": dt_util.utc_from_timestamp(ts).isoformat() if isinstance(ts, (int, float)) else dt_util.utcnow().isoformat(),
-            "alert": bool(m.get("alert")),
-            "via": m.get("rx"),
-            "rssi": m.get("rssi"),
-            "snr": m.get("snr"),
-        }
-        self.async_write_ha_state()
-
-
-class GwLastMessageSensor(RestoreEntity, SensorEntity):
-    """Ostatnia wiadomość z Twojego urządzenia LoRa, którą słyszy ta brama — na karcie bramy."""
-
-    _attr_has_entity_name = True
-    _attr_translation_key = "gw_last_message"
-    _attr_icon = "mdi:message-text"
-
-    def __init__(self, entry: ConfigEntry, gw_device_id: str, info: DeviceInfo) -> None:
-        self._entry_id = entry.entry_id
-        self._gw = gw_device_id
-        self._attr_unique_id = f"{gw_device_id}_gw_last_message"
-        self._attr_device_info = info
-        self._attr_native_value = None
-        self._attr_extra_state_attributes = {}
-
-    async def async_added_to_hass(self) -> None:
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            self._attr_native_value = last.state
-            self._attr_extra_state_attributes = dict(last.attributes)
-        self.async_on_remove(async_dispatcher_connect(
-            self.hass, gw_msg_signal(self._entry_id, self._gw), self._on_msg))
+        self.async_on_remove(async_dispatcher_connect(self.hass, msg_signal(self._entry_id), self._on_msg))
 
     @callback
     def _on_msg(self, m: dict[str, Any]) -> None:
@@ -638,5 +603,8 @@ class GwLastMessageSensor(RestoreEntity, SensorEntity):
             "device": m.get("device"),
             "received_at": dt_util.utc_from_timestamp(ts).isoformat() if isinstance(ts, (int, float)) else dt_util.utcnow().isoformat(),
             "alert": bool(m.get("alert")),
+            "via": m.get("rx"),
+            "rssi": m.get("rssi"),
+            "snr": m.get("snr"),
         }
         self.async_write_ha_state()

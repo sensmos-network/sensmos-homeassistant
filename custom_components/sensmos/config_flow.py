@@ -49,6 +49,7 @@ from .const import (
     RESERVED_PREFIXES,
     telemetry_key,
 )
+from .ldev import account_key
 from .pairing import Pairing, PairingError
 from .units import device_classes_for_unit
 
@@ -329,11 +330,12 @@ class SensmosOptionsFlow(OptionsFlow):
     # ── tryb cloud: odbiór ramek przez bramę ─────────────────
 
     def _gateways(self) -> dict[str, str]:
-        """device_id Sensmos → nazwa, z urządzeń tego wpisu (= bramy konta)."""
+        """device_id Sensmos → nazwa, z urządzeń tego wpisu (= bramy konta; bez karty konta)."""
         out: dict[str, str] = {}
+        acct = account_key(self._entry)
         for d in dr.async_entries_for_config_entry(dr.async_get(self.hass), self._entry.entry_id):
             for ident in d.identifiers:
-                if ident[0] == DOMAIN:
+                if ident[0] == DOMAIN and ident[1] != acct:
                     out[ident[1]] = d.name_by_user or d.name or ident[1][:8]
         return out
 

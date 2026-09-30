@@ -29,7 +29,7 @@ def async_describe_events(
         if d.get("enc"):
             tags.append("AES")
         return {
-            LOGBOOK_ENTRY_NAME: "LoRa frame" + (f" sub {sub}" if sub else ""),
+            LOGBOOK_ENTRY_NAME: "LoRa DATA frame" + (f" sub {sub}" if sub else ""),
             LOGBOOK_ENTRY_MESSAGE: f"received: {body} ({', '.join(tags)})",
         }
 

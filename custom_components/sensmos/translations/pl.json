@@ -186,8 +186,9 @@
       "insufficient_balance": "Za mało GALU na pierwszą dobę subskrypcji."
     }
   },
+  "device": { "account": { "name": "Konto Sensmos" } },
   "entity": {
-    "sensor": { "ldev_last_message": { "name": "Ostatnia wiadomość" }, "gw_last_message": { "name": "Ostatnia wiadomość" } },
+    "sensor": { "ldev_last_message": { "name": "Ostatnia wiadomość" } },
     "event": {
       "ldev_message": {
         "name": "Wiadomość",

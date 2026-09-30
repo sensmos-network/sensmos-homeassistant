@@ -36,10 +36,10 @@ For LoRaWAN gateways that forward to `sensmos.com:1700` and are paired with your
 
 - **Pairing without a wallet in HA** — the app issues a revocable token (scopes `lora.rx`, `lora.tx`) and hands it over sealed with the code shown in HA; the server never sees the code. Revoke it in the app and HA asks you to pair again.
 - **Gateways as devices** — every gateway on the account appears as a device; one paired or unpaired in the app appears or disappears here on its own.
-- **Your sensors' frames** — a LoRa sensor sends DATA frames to the gateway's Sensmos ID (id8). The server passes each frame on exactly as the sensor sent it and HA decrypts it itself, like a node base: a **LoRa frame sub N** sensor per sensor sub-address, the `sensmos_lora_frame` event and a logbook line. The last frames are kept on disk, so the sensors come back after a restart.
+- **Your sensors' frames** — a LoRa sensor sends DATA frames to the gateway's Sensmos ID (id8). The server passes each frame on exactly as the sensor sent it and HA decrypts it itself, like a node base: a **LoRa DATA frame sub N** sensor per sensor sub-address, the `sensmos_lora_frame` event and a logbook line. The last frames are kept on disk, so the sensors come back after a restart; a sub-address that drops off the list of recent frames disappears from HA instead of showing *unavailable*.
 - **Per-gateway options** (Configure): the **Key phrase** your sensors use (only its SHA-256 is stored) and **Also accept plain frames** (off by default).
 - **Diagnostics** — Online, Beacons sent, Last beacon, Sensmos beacons heard (24 h), Nodes heard (24 h), Heard by nodes (24 h); they turn unavailable after 3 minutes without an update from the server.
-- **Your LoRa devices** — a device (e.g. the Sensmos messenger) paired with your wallet in the app appears here on its own as a device with **Last message** (text, when, which gateway heard it) and a **Message** event entity (type *message* or *alert*) — use it as an automation trigger straight from the device page. Every message is also a logbook line (“Tatry: „kod:ALARM””). The `sensmos_device_message` bus event stays for advanced automations.
+- **Account card** — messages from devices paired with your wallet in the app (e.g. the Sensmos messenger) land on one **Sensmos account** device: **Last message** (text, from, when, who heard it) and a **Message** event entity (type *message* or *alert*) — use it as an automation trigger straight from the device page. Every message is also a logbook line (“Tatry: „kod:ALARM””). The `sensmos_device_message` bus event stays for advanced automations.
 - If HA is offline, frames addressed to the gateway are dropped (same as an offline node). Reception is billed like a node base (Wallet → Service expenses). Transmitting through the gateway is not available in this mode.
 
 ## Data-only mode (push HA sensors to the map)
@@ -117,7 +117,7 @@ If the node reports a radio in `/info` (`lora` field), the integration adds — 
 |---|---|
 | `binary_sensor.<node>_lora_emergency` | ON while the node has lost its uplink and is broadcasting its emergency entities over LoRa (attributes: `entities`) |
 | `sensor.<node>_lora_last_command` | last emergency command received over the air (from the owner's app) |
-| `sensor.<node>_lora_frame`, `…_lora_frame_sub_N` | last DATA frame per sub-address (state = payload; attributes `encrypted`, `via` = `rf`/`ws`, `hex`, `ts`) — one sensor per LoRa sensor behind this node |
+| `sensor.<node>_lora_data_frame`, `…_lora_data_frame_sub_N` | last DATA frame per sub-address (state = payload; attributes `encrypted`, `via` = `rf`/`ws`, `hex`, `ts`) — one sensor per LoRa sensor behind this node; gone when the node's recent-frames list (6) no longer has that sub-address |
 | `sensor.<node>_lora_role` | `point` / `scanner`, attributes `board`, `rx_key_set`, `accept_plain` |
 | event `sensmos_lora_cmd` | `{device_id, node_id, cmd, ts}` |
 | event `sensmos_lora_frame` | `{device_id, node_id, sub, text, hex, enc, via, ts}` |

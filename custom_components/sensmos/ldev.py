@@ -1,44 +1,28 @@
-"""Sensmos — urządzenia LoRa sparowane z kontem (np. komunikator).
+"""Sensmos — karta konta w trybie chmury.
 
-Serwer przysyła listę przy logowaniu i po każdym parowaniu, więc urządzenie pojawia się w HA
-samo. Każda wiadomość z urządzenia: czujnik „Ostatnia wiadomość”, encja zdarzenia i wpis
-w dzienniku — bez nasłuchu w narzędziach deweloperskich.
+Wiadomości z urządzeń LoRa sparowanych z kontem (np. komunikator) trafiają na jedno urządzenie
+„Konto Sensmos”: czujnik „Ostatnia wiadomość”, encja zdarzenia i wpis w dzienniku.
 """
 from __future__ import annotations
 
-from typing import Any
-
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
 
 
-def ldev_key(id8: str) -> str:
-    return f"ldev_{id8}"
+def account_key(entry: ConfigEntry) -> str:
+    return f"account_{entry.unique_id or entry.entry_id}"
 
 
-def ldev_signal(entry_id: str, id8: str) -> str:
-    return f"{DOMAIN}_ldev_{entry_id}_{id8}"
+def msg_signal(entry_id: str) -> str:
+    return f"{DOMAIN}_msg_{entry_id}"
 
 
-def gw_msg_signal(entry_id: str, gw_device_id: str) -> str:
-    return f"{DOMAIN}_gwmsg_{entry_id}_{gw_device_id}"
-
-
-def ldev_device_info(d: dict[str, Any]) -> DeviceInfo:
+def account_device_info(entry: ConfigEntry) -> DeviceInfo:
     return DeviceInfo(
-        identifiers={(DOMAIN, ldev_key(d["id8"]))},
-        name=d.get("name") or f"LoRa {d['id8']}",
+        identifiers={(DOMAIN, account_key(entry))},
+        translation_key="account",
         manufacturer="Sensmos",
-        model="LoRa device",
-        serial_number=d["id8"],
+        model="Account",
     )
-
-
-def clean_ldevs(items: list[Any]) -> list[dict[str, Any]]:
-    out = []
-    for d in items:
-        if isinstance(d, dict) and isinstance(d.get("id8"), str) and len(d["id8"]) == 8:
-            name = d.get("name")
-            out.append({"id8": d["id8"].lower(), "name": name[:32] if isinstance(name, str) else ""})
-    return out

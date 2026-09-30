@@ -186,8 +186,9 @@
       "insufficient_balance": "Not enough GALU for the first day of the subscription."
     }
   },
+  "device": { "account": { "name": "Sensmos account" } },
   "entity": {
-    "sensor": { "ldev_last_message": { "name": "Last message" }, "gw_last_message": { "name": "Last message" } },
+    "sensor": { "ldev_last_message": { "name": "Last message" } },
     "event": {
       "ldev_message": {
         "name": "Message",

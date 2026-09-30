@@ -9,7 +9,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers import config_validation as cv, device_registry as dr, translation
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import DeviceInfo
@@ -37,7 +37,7 @@ from .coordinator import GatewayCoordinator, SensmosCoordinator
 from .direct import SensmosDirect
 from .feeder import Feeder
 from .get import SensmosGet
-from .ldev import gw_msg_signal, ldev_device_info, ldev_key, ldev_signal
+from .ldev import account_device_info, account_key, msg_signal
 from .webhook import async_remove_node_webhook, async_setup_node_webhook
 
 _LOGGER = logging.getLogger(__name__)
@@ -86,12 +86,11 @@ async def _async_setup_data_entry(hass: HomeAssistant, entry: ConfigEntry) -> bo
 
 
 @callback
-def _sync_gateways(hass: HomeAssistant, entry: ConfigEntry, gateways: list[dict], ldevs: list[dict]) -> None:
-    """Urządzenia wpisu chmury = bramy i urządzenia LoRa konta; zdjęte z konta znikają z HA."""
+def _sync_gateways(hass: HomeAssistant, entry: ConfigEntry, gateways: list[dict]) -> None:
+    """Urządzenia wpisu chmury = konto i bramy; brama zdjęta z konta znika z HA."""
     dev_reg = dr.async_get(hass)
-    ids = {g["device_id"] for g in gateways} | {ldev_key(d["id8"]) for d in ldevs}
-    for d in ldevs:
-        dev_reg.async_get_or_create(config_entry_id=entry.entry_id, **ldev_device_info(d))
+    ids = {g["device_id"] for g in gateways} | {account_key(entry)}
+    dev_reg.async_get_or_create(config_entry_id=entry.entry_id, **account_device_info(entry))
     for g in gateways:
         dev_reg.async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -116,30 +115,22 @@ async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> b
     saved = await store.async_load() or {}
     coords: dict[str, GatewayCoordinator] = {}
     ready = False
-    known_ldevs: set[str] = set()
-    cloud: SensmosCloud
+    # nazwa karty konta z tłumaczeń — rejestr urządzeń czyta je tylko z pamięci podręcznej
+    await translation.async_get_translations(hass, hass.config.language, "device", {DOMAIN})
 
     def on_gateways(gws: list[dict]) -> None:
-        _sync_gateways(hass, entry, gws, cloud.ldevs)
+        _sync_gateways(hass, entry, gws)
         # nowa albo zdjęta brama → nowy komplet koordynatorów i encji
         if ready and set(coords) != {g["device_id"] for g in gws}:
             hass.config_entries.async_schedule_reload(entry.entry_id)
 
-    def on_ldevs(items: list[dict]) -> None:
-        _sync_gateways(hass, entry, cloud.gateways, items)
-        # sparowane albo odpięte urządzenie LoRa → encje od nowa
-        if ready and known_ldevs != {d["id8"] for d in items}:
-            hass.config_entries.async_schedule_reload(entry.entry_id)
-
     def on_ldev_msg(m: dict) -> None:
         # po urządzeniach wpisu, nie async_get_device (od HA 2026.9 wycofane, a starsze nie mają następcy)
-        key = (DOMAIN, ldev_key(m["device"]))
+        key = (DOMAIN, account_key(entry))
         dev = next((d for d in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
                     if key in d.identifiers), None)
         hass.bus.async_fire(EVENT_DEVICE_MESSAGE, {**m, "device_id": dev.id if dev else None})
-        async_dispatcher_send(hass, ldev_signal(entry.entry_id, m["device"]), m)
-        for gw in m.get("gws") or []:
-            async_dispatcher_send(hass, gw_msg_signal(entry.entry_id, gw), m)
+        async_dispatcher_send(hass, msg_signal(entry.entry_id), m)
 
     def on_frame(m: dict) -> dict | None:
         c = coords.get(str(m.get("gw") or "").lower())
@@ -154,7 +145,7 @@ async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> b
     def save() -> None:
         store.async_delay_save(lambda: {g: c.dump() for g, c in coords.items()}, 10)
 
-    cloud = SensmosCloud(hass, entry, on_gateways, on_frame, on_stats, on_ldevs, on_ldev_msg)
+    cloud = SensmosCloud(hass, entry, on_gateways, on_frame, on_stats, on_ldev_msg)
     try:
         await cloud.connect()
     except CloudAuthError as err:
@@ -163,13 +154,11 @@ async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> b
         raise ConfigEntryNotReady(str(err)) from err
     for g in cloud.gateways:
         coords[g["device_id"]] = GatewayCoordinator(hass, entry, g, saved.get(g["device_id"]), save)
-    known_ldevs.update(d["id8"] for d in cloud.ldevs)
     ready = True
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "mode": MODE_CLOUD,
         "cloud": cloud,
         "coordinators": coords,
-        "ldevs": list(cloud.ldevs),
         "store": store,
     }
     await hass.config_entries.async_forward_entry_setups(entry, CLOUD_PLATFORMS)
@@ -252,11 +241,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
-    # Brama konta wraca z listą z BE — usuwa się ją w apce (odparowanie), nie tutaj.
+    # Brama konta wraca z listą z BE — usuwa się ją w apce (odparowanie), nie tutaj; karta konta
+    # żyje razem z wpisem.
     data = hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}
     if data.get("mode") == MODE_CLOUD:
         return not any(
-            i[0] == DOMAIN and i[1] in data["coordinators"] for i in device_entry.identifiers
+            i[0] == DOMAIN and (i[1] in data["coordinators"] or i[1] == account_key(entry))
+            for i in device_entry.identifiers
         )
     return True
 
