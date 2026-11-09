@@ -22,13 +22,20 @@ Bring Sensmos into Home Assistant — three ways:
 
 ## Installation
 
-1. HACS → Integrations → ⋮ → **Custom repositories** → add this repo (category *Integration*).
-2. Install **Sensmos**, then restart Home Assistant.
-3. Settings → Devices & Services → **Add Integration** → **Sensmos**.
-4. Pick a mode:
+One click opens this repository in HACS (HACS must be installed):
+
+[![Open Sensmos in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sensmos-network&repository=sensmos-homeassistant&category=integration)
+
+1. Press the button and **Download** (or HACS → ⋮ → **Custom repositories** → add `https://github.com/sensmos-network/sensmos-homeassistant`, category *Integration*), then restart Home Assistant.
+2. Add the integration:
+
+   [![Add the Sensmos integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=sensmos)
+3. Pick a mode:
    - **🔌 Physical node** — enter the **node address** (IP from the Sensmos app, or `sensmos-xxxxxx.local`) and the **PIN**.
    - **🟣 Data only** — enter a **passkey** (≥32 chars; this is your node's identity), optionally a label and lat/lon. Then open **Configure** to choose which HA sensors to publish.
    - **☁️ Sensmos account** — HA shows a 12-character code; in the Sensmos app open **Settings → Paired devices → Pair** and enter it.
+
+> **Want Home Assistant itself to be a full node?** On Home Assistant OS use the [Sensmos Hub add-on](https://github.com/sensmos-network/sensmos-hub): a node without an ESP32, with the encrypted tunnel to HA from the app. Step-by-step guide: https://sensmos.com/ha/
 
 ## Sensmos account mode (your LoRaWAN gateways)
 
@@ -52,7 +59,7 @@ No Sensmos hardware needed. After adding the integration in **Data only** mode, 
 - **➖ Stop previewing a node**.
 - **⚙️ Settings** — push interval (min 20 s), preview poll interval (min 2 min), map label, optional lat/lon (GeoIP if empty).
 
-Your sensors show up on the [live map](https://sensmos.com/map/) as a purple software node. Numeric sensors send value+unit; binary sensors send `1`/`0`. Up to 50 entities. Native entity names: see the full list in the [ESPHome component README](https://github.com/Galusz/sensmos-esphome#entity-names).
+Your sensors show up on the [live map](https://sensmos.com/map/) as a purple software node. Numeric sensors send value+unit; binary sensors send `1`/`0`. Up to 50 entities. Native entity names: see the full list in the [ESPHome component README](https://github.com/sensmos-network/sensmos-esphome#entity-names).
 
 ---
 
@@ -160,9 +167,10 @@ Frame reception uses a key phrase that never leaves the node (set it in the app:
 | | |
 |---|---|
 | 🌐 Website | https://sensmos.com |
-| 📱 App | https://github.com/Galusz/sensmos-app |
-| 🔌 Firmware | https://github.com/Galusz/sensmos-firmware |
-| 📜 Protocol | https://github.com/Galusz/sensmos-protocol |
+| 📱 App | https://github.com/sensmos-network/sensmos-app |
+| 🔌 Firmware | https://github.com/sensmos-network/sensmos-firmware |
+| 🏠 Hub (node without ESP32) | https://github.com/sensmos-network/sensmos-hub |
+| 📜 Protocol | https://github.com/sensmos-network/sensmos-protocol |
 | 💬 Discord | https://discord.gg/ukea386Kqx |
 
 GALU runs on Polygon. © 2026 Sensmos.

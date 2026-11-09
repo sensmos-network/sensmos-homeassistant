@@ -4,10 +4,10 @@
   "codeowners": ["@Galusz"],
   "config_flow": true,
   "dependencies": ["webhook"],
-  "documentation": "https://sensmos.com",
+  "documentation": "https://sensmos.com/ha/",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/Galusz/sensmos-homeassistant/issues",
+  "issue_tracker": "https://github.com/sensmos-network/sensmos-homeassistant/issues",
   "requirements": [],
   "version": "0.11.0"
 }
