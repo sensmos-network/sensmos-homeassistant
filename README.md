@@ -27,7 +27,7 @@ One click opens this repository in HACS (HACS must be installed):
 [![Open Sensmos in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sensmos-network&repository=sensmos-homeassistant&category=integration)
 
 1. Press the button and **Download** (or HACS → ⋮ → **Custom repositories** → add `https://github.com/sensmos-network/sensmos-homeassistant`, category *Integration*), then restart Home Assistant.
-2. Add the integration:
+2. **Have a Sensmos node on the same network?** After the restart Home Assistant finds it by itself (0.12.0+): open **Settings → Devices & services**, click **Add** on the discovered *Sensmos* card and type only the node's PIN. If the router later gives the node a new IP, the integration picks it up on its own. Otherwise add the integration by hand:
 
    [![Add the Sensmos integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=sensmos)
 3. Pick a mode:

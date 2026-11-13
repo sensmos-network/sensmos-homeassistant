@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Add Sensmos",
@@ -38,6 +39,11 @@
       "reauth_confirm": {
         "title": "Pair Home Assistant again",
         "description": "Access to your Sensmos account was revoked or has expired. Pair again with a new code from the app."
+      },
+      "zeroconf_confirm": {
+        "title": "Sensmos node found",
+        "description": "Home Assistant found a Sensmos node on your network ({host}, ID {id8}…). Enter its PIN to add it — the PIN is shown in the Sensmos app on the node's card.",
+        "data": { "pin": "Node PIN" }
       }
     },
     "progress": {
@@ -59,7 +65,10 @@
       "pair_timeout": "3 minutes passed without the code being entered in the app. Try again.",
       "wrong_account": "This is a different account than the one paired before. Add it as a new entry.",
       "reauth_successful": "Paired again.",
-      "reauth_unsupported": "This entry cannot be paired again — remove it and add it anew."
+      "reauth_unsupported": "This entry cannot be paired again — remove it and add it anew.",
+      "not_sensmos_device": "This device does not look like a Sensmos node.",
+      "hub_not_supported": "This is Sensmos Hub — it adds its own entities to Home Assistant, nothing to set up here.",
+      "cannot_connect": "Cannot reach the node. Add it manually with its address."
     }
   },
   "options": {

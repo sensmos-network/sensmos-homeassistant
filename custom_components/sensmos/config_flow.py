@@ -91,6 +91,38 @@ class SensmosConfigFlow(ConfigFlow, domain=DOMAIN):
         # Wybór drogi: fizyczny node (host+PIN), same dane (passkey → mapa) albo konto (bramy).
         return self.async_show_menu(step_id="user", menu_options=["node", "data", "cloud"])
 
+    async def _try_node(self, host: str, pin: str) -> tuple[Any, dict[str, str]]:
+        """Sprawdza host+PIN i tworzy wpis; zwraca (wynik, błędy). Wspólne dla ręcznego i z wykrycia."""
+        errors: dict[str, str] = {}
+        api = SensmosApi(async_get_clientsession(self.hass), host, pin)
+        try:
+            cfg = await api.config()
+            device_id = cfg.get("device_id", "")
+            if not device_id:
+                errors["base"] = "cannot_connect"
+                return None, errors
+            await self.async_set_unique_id(device_id, raise_on_progress=False)
+            self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+            info = {}
+            try:
+                info = await api.info()
+            except SensmosApiError:
+                pass
+            title = info.get("city") or f"Node {device_id[:8]}"
+            return (
+                self.async_create_entry(
+                    title=f"Sensmos {title}",
+                    data={CONF_MODE: MODE_NODE, CONF_HOST: host, CONF_PIN: pin},
+                    options={OPT_FEEDS: [], OPT_WEBHOOK: True},
+                ),
+                errors,
+            )
+        except SensmosAuthError:
+            errors["base"] = "invalid_pin"
+        except SensmosApiError:
+            errors["base"] = "cannot_connect"
+        return None, errors
+
     async def async_step_node(
         self, user_input: dict[str, Any] | None = None
     ) -> Any:
@@ -98,30 +130,9 @@ class SensmosConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST].strip().replace("http://", "").rstrip("/")
             pin = user_input[CONF_PIN].strip()
-            api = SensmosApi(async_get_clientsession(self.hass), host, pin)
-            try:
-                cfg = await api.config()
-                device_id = cfg.get("device_id", "")
-                if not device_id:
-                    errors["base"] = "cannot_connect"
-                else:
-                    await self.async_set_unique_id(device_id)
-                    self._abort_if_unique_id_configured()
-                    info = {}
-                    try:
-                        info = await api.info()
-                    except SensmosApiError:
-                        pass
-                    title = info.get("city") or f"Node {device_id[:8]}"
-                    return self.async_create_entry(
-                        title=f"Sensmos {title}",
-                        data={CONF_MODE: MODE_NODE, CONF_HOST: host, CONF_PIN: pin},
-                        options={OPT_FEEDS: [], OPT_WEBHOOK: True},
-                    )
-            except SensmosAuthError:
-                errors["base"] = "invalid_pin"
-            except SensmosApiError:
-                errors["base"] = "cannot_connect"
+            result, errors = await self._try_node(host, pin)
+            if result is not None:
+                return result
 
         return self.async_show_form(
             step_id="node",
@@ -135,6 +146,53 @@ class SensmosConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                 }
             ),
+            errors=errors,
+        )
+
+    # ── wykrycie w LAN: FW i Hub ogłaszają _sensmos._tcp (TXT device_id, version) ──
+
+    _disc_host = ""
+    _disc_id = ""
+
+    async def async_step_zeroconf(self, discovery_info: Any) -> Any:
+        props = getattr(discovery_info, "properties", None) or {}
+        device_id = str(props.get("device_id") or "").strip()
+        version = str(props.get("version") or "")
+        if not device_id:
+            return self.async_abort(reason="not_sensmos_device")
+        # Hub (dodatek/Docker) sam wystawia encje w HA; integracja w trybie noda go nie obsługuje.
+        if version.startswith("hub-"):
+            return self.async_abort(reason="hub_not_supported")
+        host = str(getattr(discovery_info, "host", "") or "")
+        if not host or ":" in host:
+            # Brak adresu albo IPv6 (FW słucha po IPv4) — zostaje dodanie ręczne.
+            return self.async_abort(reason="cannot_connect")
+        port = getattr(discovery_info, "port", None)
+        if port and port != 80:
+            host = f"{host}:{port}"
+        await self.async_set_unique_id(device_id)
+        # Znany node: tylko nowy adres (DHCP dał inne IP) i przeładowanie wpisu, bez pytania.
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+        self._disc_host, self._disc_id = host, device_id
+        self.context["title_placeholders"] = {"name": f"Node {device_id[:8]}"}
+        return await self.async_step_zeroconf_confirm()
+
+    async def async_step_zeroconf_confirm(self, user_input=None) -> Any:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            result, errors = await self._try_node(self._disc_host, user_input[CONF_PIN].strip())
+            if result is not None:
+                return result
+        return self.async_show_form(
+            step_id="zeroconf_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PIN): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                    ),
+                }
+            ),
+            description_placeholders={"host": self._disc_host, "id8": self._disc_id[:8]},
             errors=errors,
         )
 

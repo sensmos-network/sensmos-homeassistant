@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Dodaj Sensmos",
@@ -38,6 +39,11 @@
       "reauth_confirm": {
         "title": "Sparuj Home Assistant ponownie",
         "description": "Dostęp do konta Sensmos został odwołany albo wygasł. Sparuj ponownie nowym kodem z aplikacji."
+      },
+      "zeroconf_confirm": {
+        "title": "Znaleziono node Sensmos",
+        "description": "Home Assistant znalazł w Twojej sieci node Sensmos ({host}, ID {id8}…). Wpisz jego PIN, żeby go dodać — PIN widać w aplikacji Sensmos na karcie noda.",
+        "data": { "pin": "PIN noda" }
       }
     },
     "progress": {
@@ -59,7 +65,10 @@
       "pair_timeout": "Minęły 3 minuty, a kodu nie wpisano w aplikacji. Spróbuj ponownie.",
       "wrong_account": "To inne konto niż sparowane wcześniej. Dodaj je jako nowy wpis.",
       "reauth_successful": "Sparowano ponownie.",
-      "reauth_unsupported": "Tego wpisu nie da się sparować ponownie — usuń go i dodaj od nowa."
+      "reauth_unsupported": "Tego wpisu nie da się sparować ponownie — usuń go i dodaj od nowa.",
+      "not_sensmos_device": "To urządzenie nie wygląda na node Sensmos.",
+      "hub_not_supported": "To Sensmos Hub — sam dodaje swoje encje do Home Assistanta, tu nie ma czego konfigurować.",
+      "cannot_connect": "Nie można połączyć z nodem. Dodaj go ręcznie, podając adres."
     }
   },
   "options": {

@@ -9,5 +9,6 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/sensmos-network/sensmos-homeassistant/issues",
   "requirements": [],
-  "version": "0.11.0"
+  "version": "0.12.0",
+  "zeroconf": ["_sensmos._tcp.local."]
 }
