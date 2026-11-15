@@ -9,9 +9,9 @@ blueprint:
     bez internetu. Każda wiadomość dostaje potwierdzenie radiem noda i Twoją odpowiedź, jeśli czeka.
     Range test (firmware 0.18-kom): "t #n" gets a silent "ok #n", no notification.
     Reply straight from the notification (Home Assistant app): a quick reply goes out by radio at once, a later one
-    waits in the reply helper for the messenger's next "?" question. /
+    waits in the reply helper for the messenger's next "?" question. "I'm safe" goes to the whole family list. /
     Test zasięgu (0.18-kom): na „t #n” idzie ciche „ok #n”, bez powiadomienia.
-    Odpowiedź prosto z powiadomienia w aplikacji Home Assistant.
+    Odpowiedź prosto z powiadomienia w aplikacji Home Assistant. „Jestem bezpieczny” idzie do wszystkich bliskich.
   domain: automation
   source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/komunikator_dom.yaml
   input:
@@ -45,6 +45,20 @@ blueprint:
       selector:
         entity:
           domain: input_text
+    name:
+      name: Messenger owner / Czyj komunikator
+      description: Shown to the family, e.g. "Piotr".
+      default: Komunikator
+      selector:
+        text:
+    family:
+      name: Family for "I'm safe" / Bliscy do „Jestem bezpieczny” (optional)
+      description: >-
+        Notify services separated by commas. A message "jestem bezpieczny", "jestem ok", "I'm safe", "bin sicher"
+        or "estou bem" goes to all of them at once, from the field without internet, through your home's connection.
+      default: ""
+      selector:
+        text:
 
 mode: parallel
 max: 5
@@ -54,6 +68,9 @@ variables:
   sub: !input sub
   notify_service: !input notify_service
   reply_entity: !input reply
+  owner: !input name
+  family: !input family
+  family_list: "{{ family.split(',') | map('trim') | reject('eq', '') | list }}"
 
 trigger:
   - platform: event
@@ -103,6 +120,19 @@ action:
                   entity_id: "{{ reply_entity }}"
                 data:
                   value: ""
+          # „Jestem bezpieczny”: z pola bez internetu przez łącze domu do wszystkich bliskich naraz.
+          - if: >-
+              {{ family_list | count > 0 and body | lower | trim is
+                 search('^(jestem bezpieczn\\w*|jestem ok|wszystko ok|i.?m safe|i am safe|safe|bin sicher|mir geht es gut|estou bem|estou segur[oa])[.! ]*$') }}
+            then:
+              - repeat:
+                  for_each: "{{ family_list }}"
+                  sequence:
+                    - service: "{{ repeat.item }}"
+                      continue_on_error: true
+                      data:
+                        title: "{{ owner }}: jestem bezpieczny"
+                        message: "{{ body }} (przez komunikator Sensmos, {{ now().strftime('%H:%M') }})"
           - if: "{{ notify_service != '' }}"
             then:
               - service: "{{ notify_service }}"
