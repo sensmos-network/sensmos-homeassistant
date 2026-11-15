@@ -7,6 +7,8 @@ blueprint:
     The node should be in Point mode (app → node → LoRa → Frame reception). /
     Komunikator (firmware 0.17-kom) → Twój nod Sensmos w domu → Home Assistant, radiem i siecią lokalną,
     bez internetu. Każda wiadomość dostaje potwierdzenie radiem noda i Twoją odpowiedź, jeśli czeka.
+    Range test (firmware 0.18-kom): "t #n" gets a silent "ok #n", no notification. /
+    Test zasięgu (0.18-kom): na „t #n” idzie ciche „ok #n”, bez powiadomienia.
   domain: automation
   source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/komunikator_dom.yaml
   input:
@@ -68,7 +70,18 @@ action:
         {{ text | regex_replace('^#\d+ ', '') }}
       pending: >-
         {% set p = states(reply_entity) if reply_entity else '' %}{{ '' if p in ['unknown', 'unavailable', 'none'] else p[:90] }}
+      ping: >-
+        {% set m = text | regex_findall('^t #(\d+)$') %}{{ m[0] if m else '' }}
   - choose:
+      - conditions: "{{ ping != '' }}"
+        sequence:
+          - service: sensmos.lora_send
+            data:
+              device_id: "{{ node }}"
+              dst: "{{ dst }}"
+              sub: "{{ sub | int }}"
+              payload: "ok #{{ ping }}"
+              aes: true
       - conditions: "{{ num != '' }}"
         sequence:
           - service: sensmos.lora_send

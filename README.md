@@ -143,6 +143,8 @@ data:
 
 **Messenger to home without internet** (messenger firmware 0.17-kom): the messenger sends `#n text` straight to this node by radio (app → messenger → Home without internet), the node puts it in its inbox and the integration reads it over the local network, so it works with the internet down on both ends. Import the blueprint [`komunikator_dom.yaml`](blueprints/automation/sensmos/komunikator_dom.yaml): it sends the confirmation `ok #n` back through the node's radio, adds your reply from an `input_text` helper if one is waiting, and notifies your phone. The messenger listens for the answer for a minute after each send and retries up to 3 times. Put the node in Point mode so it hears the messenger all the time.
 
+**Range test** (messenger firmware 0.18-kom): the app's range test sends `t #n` about once a minute while you walk; the same blueprint answers each one with a silent `ok #n` (no notification, your pending reply stays for the next message), and the messenger records how well it heard home. Update the blueprint after upgrading the messenger: re-import it from the button below.
+
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fkomunikator_dom.yaml)
 
 Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
