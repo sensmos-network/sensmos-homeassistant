@@ -7,8 +7,11 @@ blueprint:
     The node should be in Point mode (app → node → LoRa → Frame reception). /
     Komunikator (firmware 0.17-kom) → Twój nod Sensmos w domu → Home Assistant, radiem i siecią lokalną,
     bez internetu. Każda wiadomość dostaje potwierdzenie radiem noda i Twoją odpowiedź, jeśli czeka.
-    Range test (firmware 0.18-kom): "t #n" gets a silent "ok #n", no notification. /
+    Range test (firmware 0.18-kom): "t #n" gets a silent "ok #n", no notification.
+    Reply straight from the notification (Home Assistant app): a quick reply goes out by radio at once, a later one
+    waits in the reply helper for the messenger's next "?" question. /
     Test zasięgu (0.18-kom): na „t #n” idzie ciche „ok #n”, bez powiadomienia.
+    Odpowiedź prosto z powiadomienia w aplikacji Home Assistant.
   domain: automation
   source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/komunikator_dom.yaml
   input:
@@ -43,7 +46,7 @@ blueprint:
         entity:
           domain: input_text
 
-mode: queued
+mode: parallel
 max: 5
 
 variables:
@@ -62,6 +65,8 @@ condition:
 
 action:
   - variables:
+      t0: "{{ now().timestamp() }}"
+      reply_action: "SENSMOS_KOM_REPLY_{{ context.id }}"
       text: "{{ trigger.event.data.text or '' }}"
       dst: "{{ (trigger.event.data.node_id or '')[:8] }}"
       num: >-
@@ -104,6 +109,44 @@ action:
                 data:
                   title: Sensmos – komunikator
                   message: "{{ body }}"
+                  data:
+                    tag: "sensmos-kom-{{ sub }}"
+                    actions:
+                      - action: "{{ reply_action }}"
+                        title: Odpowiedz / Reply
+                        behavior: textInput
+              # Odpowiedź wpisana prosto w powiadomieniu (aplikacja Home Assistant, Android i iOS).
+              - wait_for_trigger:
+                  - platform: event
+                    event_type: mobile_app_notification_action
+                    event_data:
+                      action: "{{ reply_action }}"
+                timeout: { minutes: 30 }
+                continue_on_timeout: false
+              - variables:
+                  answer: "{{ (wait.trigger.event.data.reply_text or '') | trim | truncate(90, true, '') }}"
+                  quick: "{{ now().timestamp() - t0 < 50 }}"
+              - choose:
+                  - conditions: "{{ answer == '' }}"
+                    sequence: []
+                  # Komunikator słucha jeszcze minutę po wysłaniu: szybka odpowiedź idzie od razu radiem.
+                  - conditions: "{{ quick or not reply_entity }}"
+                    sequence:
+                      - service: sensmos.lora_send
+                        data:
+                          device_id: "{{ node }}"
+                          dst: "{{ dst }}"
+                          sub: "{{ sub | int }}"
+                          payload: "ok|{{ answer }}"
+                          aes: true
+                  # Później: odpowiedź czeka w pomocniku i jedzie z następnym pytaniem „?” albo potwierdzeniem.
+                  - conditions: "{{ true }}"
+                    sequence:
+                      - service: input_text.set_value
+                        target:
+                          entity_id: "{{ reply_entity }}"
+                        data:
+                          value: "{{ answer }}"
       - conditions: "{{ text == '?' and pending != '' }}"
         sequence:
           - service: sensmos.lora_send
