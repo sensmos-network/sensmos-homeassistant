@@ -1,0 +1,127 @@
+blueprint:
+  name: Sensmos – chłodnia i zamrażarka
+  description: >-
+    Alarm for a cold room, a display fridge or a freezer: temperature above the limit for longer than a door opening,
+    or no reading for too long (power cut, unplugged board, sensor out of range). One notification per problem and
+    one when it is back to normal (a short door opening sends nothing). Works with any temperature sensor; with Sensmos LoRa (ESPHome recipe
+    lora-chlodnia.yaml) it needs no Wi-Fi in the back room. The temperature log stays in Home Assistant history
+    (History → download CSV). /
+    Alarm chłodni: temperatura ponad próg dłużej niż otwarcie drzwi albo brak odczytu (brak prądu, odpięta płytka).
+    Historia temperatur zostaje w HA (Historia → pobierz CSV).
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/chlodnia.yaml
+  input:
+    temp:
+      name: Temperature sensor / Czujnik temperatury
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+    name:
+      name: Name / Nazwa
+      default: Chłodnia
+      selector:
+        text:
+    max_c:
+      name: Upper limit (°C) / Górny próg (°C)
+      description: E.g. 5 for a cold room, -15 for a freezer.
+      default: 5
+      selector:
+        number:
+          min: -30
+          max: 20
+          step: 0.5
+          unit_of_measurement: °C
+    over_min:
+      name: Above the limit for (min) / Ponad progiem przez (min)
+      description: Longer than a normal door opening or a delivery.
+      default: 20
+      selector:
+        number:
+          min: 5
+          max: 120
+          unit_of_measurement: min
+    stale_min:
+      name: No reading for (min) / Brak odczytu przez (min)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 360
+          unit_of_measurement: min
+    notify:
+      name: Notify / Powiadom
+      description: Notify services separated by commas, e.g. notify.mobile_app_owner, notify.mobile_app_chef
+      selector:
+        text:
+
+mode: parallel
+max: 10
+max_exceeded: silent
+
+variables:
+  temp: !input temp
+  name: !input name
+  max_c: !input max_c
+  over_min: !input over_min
+  stale_min: !input stale_min
+  notify: !input notify
+  targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input temp
+    above: !input max_c
+    for:
+      minutes: !input over_min
+    id: hot
+  # Brak odczytu: co 5 minut sprawdzamy, kiedy czujnik ostatnio coś przysłał (ramka LoRa odświeża last_updated).
+  - platform: time_pattern
+    minutes: "/5"
+    id: tick
+
+action:
+  - variables:
+      age_min: "{{ ((now() - states[temp].last_updated).total_seconds() / 60) | int if states[temp] is not none else 0 }}"
+      value: "{{ states(temp) }}"
+  - choose:
+      - conditions: "{{ trigger.id == 'hot' }}"
+        sequence:
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "{{ name }}: za ciepło"
+                    message: "{{ value }} °C, powyżej {{ max_c }} °C od ponad {{ over_min }} min. Sprawdź drzwi i agregat."
+                    data: { tag: "sensmos-cold-{{ temp }}", ttl: 0, priority: high }
+          # Po alarmie czekamy, aż temperatura wróci pod próg na 5 min, i dajemy znać, że jest w normie.
+          - wait_for_trigger:
+              - platform: numeric_state
+                entity_id: !input temp
+                below: !input max_c
+                for: { minutes: 5 }
+            timeout: { hours: 24 }
+            continue_on_timeout: false
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "{{ name }}: temperatura w normie"
+                    message: "{{ states(temp) }} °C."
+                    data: { tag: "sensmos-cold-{{ temp }}" }
+      # Jedno powiadomienie na ciszę: tylko w pierwszym okienku 5 min po przekroczeniu stale_min.
+      - conditions: "{{ trigger.id == 'tick' and age_min >= (stale_min | int) and age_min < (stale_min | int) + 5 }}"
+        sequence:
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "{{ name }}: brak odczytu"
+                    message: "Od {{ age_min }} min nie ma pomiaru. Możliwy brak prądu albo odpięta płytka."
+                    data: { tag: "sensmos-cold-stale-{{ temp }}", ttl: 0, priority: high }

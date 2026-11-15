@@ -155,6 +155,10 @@ data:
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fcisza_w_domu.yaml)
 
+**Cold room and freezer** (ESPHome recipe [`lora-chlodnia.yaml`](https://github.com/sensmos-network/sensmos-esphome/blob/main/examples/lora-chlodnia.yaml), or any temperature sensor): import [`chlodnia.yaml`](blueprints/automation/sensmos/chlodnia.yaml), one automation per probe. It notifies when the temperature stays above your limit longer than a door opening, again when it is back to normal, and once when no reading came for too long (power cut, unplugged board). The temperature log is Home Assistant's own history: History → download data as CSV. For HACCP paperwork use a calibrated reference thermometer and compare the probes with it now and then.
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fchlodnia.yaml)
+
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fkomunikator_dom.yaml)
 
 Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
