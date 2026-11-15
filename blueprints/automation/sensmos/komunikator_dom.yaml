@@ -1,0 +1,107 @@
+blueprint:
+  name: Sensmos – komunikator z domem bez internetu
+  description: >-
+    Messenger (firmware 0.17-kom) → your Sensmos node at home → Home Assistant, all over radio and the
+    local network, no internet needed. Each message "#n text" gets a confirmation "ok #n" sent back by the
+    node's radio, plus your pending reply if there is one, and a notification on your phone.
+    The node should be in Point mode (app → node → LoRa → Frame reception). /
+    Komunikator (firmware 0.17-kom) → Twój nod Sensmos w domu → Home Assistant, radiem i siecią lokalną,
+    bez internetu. Każda wiadomość dostaje potwierdzenie radiem noda i Twoją odpowiedź, jeśli czeka.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/komunikator_dom.yaml
+  input:
+    node:
+      name: Node at home / Nod w domu
+      description: The Sensmos node with a LoRa radio that the messenger sends to (its id8 is set in the messenger).
+      selector:
+        device:
+          integration: sensmos
+    sub:
+      name: Messenger sensor number (sub) / Numer komunikatora (sub)
+      description: The same number as in the app, messenger → Home without internet.
+      default: 9
+      selector:
+        number:
+          min: 1
+          max: 255
+          mode: box
+    notify_service:
+      name: Notify service / Usługa powiadomień
+      description: For example notify.mobile_app_my_phone. Empty = no notification.
+      default: ""
+      selector:
+        text:
+    reply:
+      name: Reply helper (optional) / Pomocnik z odpowiedzią (opcjonalnie)
+      description: >-
+        An input_text helper. Whatever you type there goes back to the messenger with the next confirmation
+        or the next "?" question (the messenger asks every few minutes), then the helper is cleared.
+      default: ""
+      selector:
+        entity:
+          domain: input_text
+
+mode: queued
+max: 5
+
+variables:
+  node: !input node
+  sub: !input sub
+  notify_service: !input notify_service
+  reply_entity: !input reply
+
+trigger:
+  - platform: event
+    event_type: sensmos_lora_frame
+
+condition:
+  - condition: template
+    value_template: "{{ trigger.event.data.device_id == node and (trigger.event.data.sub | int(0)) == (sub | int) }}"
+
+action:
+  - variables:
+      text: "{{ trigger.event.data.text or '' }}"
+      dst: "{{ (trigger.event.data.node_id or '')[:8] }}"
+      num: >-
+        {% set m = text | regex_findall('^#(\d+) ') %}{{ m[0] if m else '' }}
+      body: >-
+        {{ text | regex_replace('^#\d+ ', '') }}
+      pending: >-
+        {% set p = states(reply_entity) if reply_entity else '' %}{{ '' if p in ['unknown', 'unavailable', 'none'] else p[:90] }}
+  - choose:
+      - conditions: "{{ num != '' }}"
+        sequence:
+          - service: sensmos.lora_send
+            data:
+              device_id: "{{ node }}"
+              dst: "{{ dst }}"
+              sub: "{{ sub | int }}"
+              payload: "ok #{{ num }}{{ '|' ~ pending if pending else '' }}"
+              aes: true
+          - if: "{{ pending != '' }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: "{{ reply_entity }}"
+                data:
+                  value: ""
+          - if: "{{ notify_service != '' }}"
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: Sensmos – komunikator
+                  message: "{{ body }}"
+      - conditions: "{{ text == '?' and pending != '' }}"
+        sequence:
+          - service: sensmos.lora_send
+            data:
+              device_id: "{{ node }}"
+              dst: "{{ dst }}"
+              sub: "{{ sub | int }}"
+              payload: "ok|{{ pending }}"
+              aes: true
+          - service: input_text.set_value
+            target:
+              entity_id: "{{ reply_entity }}"
+            data:
+              value: ""
