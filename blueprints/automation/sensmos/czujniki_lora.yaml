@@ -1,0 +1,135 @@
+blueprint:
+  name: Sensmos – zdrowie czujników LoRa
+  description: >-
+    One place for all your Sensmos LoRa sensors (Sensmos Hub 0.2.0-beta2 or newer): a notification when a sensor
+    goes quiet and when it is back, and one daily summary of weak batteries, low voltage and weak radio links, instead
+    of a separate automation per sensor. Works with every Sensmos ESPHome recipe and with plain ESPHome boards sent
+    through the hub. /
+    Wszystkie czujniki LoRa Sensmos w jednym miejscu: powiadomienie, gdy czujnik zamilknie i gdy wróci, oraz jedno
+    dzienne podsumowanie słabych baterii, niskiego napięcia i słabego sygnału zamiast osobnej automatyzacji na czujnik.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/czujniki_lora.yaml
+  input:
+    notify:
+      name: Notify / Powiadom
+      description: Notify services separated by commas, e.g. notify.mobile_app_owner
+      selector:
+        text:
+    report_time:
+      name: Daily summary at / Podsumowanie dzienne o
+      default: "08:00:00"
+      selector:
+        time:
+    bat_pct:
+      name: Battery below (%) / Bateria poniżej (%)
+      description: For sensors with a bat or batt value.
+      default: 20
+      selector:
+        number: { min: 5, max: 60, unit_of_measurement: "%" }
+    volt_min:
+      name: Voltage below (V) / Napięcie poniżej (V)
+      description: For sensors with v, vbat, volt (V) or mv (mV). 3.4 V suits a single Li-ion cell. Sensors on a 12 V battery (car, camper) go in Skip below.
+      default: 3.4
+      selector:
+        number: { min: 2.5, max: 4.2, step: 0.05, unit_of_measurement: V }
+    rssi_min:
+      name: Signal weaker than (dBm) / Sygnał słabszy niż (dBm)
+      description: From the sensor's _heard entity (which node heard it last). At SF11 frames are lost below about -125 dBm.
+      default: -122
+      selector:
+        number: { min: -140, max: -90, unit_of_measurement: dBm }
+    ignore:
+      name: Skip sensors (sub numbers) / Pomiń czujniki (numery sub)
+      description: Comma separated, e.g. 6, 7 for the car and the camper on a 12 V battery.
+      default: ""
+      selector:
+        text:
+
+mode: queued
+max: 20
+
+variables:
+  notify: !input notify
+  targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+  bat_pct: !input bat_pct
+  volt_min: !input volt_min
+  rssi_min: !input rssi_min
+  ignore_in: !input ignore
+  ignore: "{{ ignore_in.split(',') | map('trim') | reject('eq', '') | map('int') | list }}"
+
+trigger:
+  - platform: event
+    event_type: sensmos_lora_silent
+    id: silent
+  - platform: event
+    event_type: sensmos_lora_back
+    id: back
+  - platform: time
+    at: !input report_time
+    id: report
+
+action:
+  - variables:
+      sub: "{{ trigger.event.data.sub | int(0) if trigger.platform == 'event' else 0 }}"
+      label: >-
+        {% set n = state_attr('sensor.sensmos_lora_' ~ sub, 'friendly_name') %}{{ n if n else 'Sensmos LoRa ' ~ sub }}
+  - condition: "{{ trigger.id == 'report' or sub not in ignore }}"
+  - choose:
+      - conditions: "{{ trigger.id == 'silent' }}"
+        sequence:
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "{{ label }}: cisza"
+                    message: >-
+                      Brak ramki od {{ ((trigger.event.data.silent_s | int(0)) / 3600) | round(1) }} h.
+                      Sprawdź baterię i zasilanie płytki albo zasięg do najbliższego noda.
+                    data: { tag: "sensmos-lora-{{ sub }}", ttl: 0, priority: high }
+      - conditions: "{{ trigger.id == 'back' }}"
+        sequence:
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "{{ label }}: znowu nadaje"
+                    message: "Czujnik wrócił po {{ ((trigger.event.data.silent_s | int(0)) / 3600) | round(1) }} h ciszy."
+                    data: { tag: "sensmos-lora-{{ sub }}" }
+      - conditions: "{{ trigger.id == 'report' }}"
+        sequence:
+          - variables:
+              lines: >-
+                {%- set out = namespace(l=[]) -%}
+                {%- for s in states.sensor | selectattr('entity_id', 'search', '^sensor\\.sensmos_lora_[0-9]+_(bat|batt|v|vbat|volt|mv|heard)$') -%}
+                  {%- set m = s.entity_id | regex_findall('^sensor\\.sensmos_lora_([0-9]+)_(.*)$') -%}
+                  {%- set n = m[0][0] | int -%}{%- set k = m[0][1] -%}
+                  {%- if n not in ignore -%}
+                    {%- if k in ['bat', 'batt'] and s.state | is_number and s.state | float < bat_pct | float -%}
+                      {%- set out.l = out.l + ['sub ' ~ n ~ ': bateria ' ~ s.state ~ ' %'] -%}
+                    {%- elif k in ['v', 'vbat', 'volt', 'mv'] and s.state | is_number -%}
+                      {%- set v = s.state | float / (1000 if k == 'mv' else 1) -%}
+                      {%- if 0.5 < v < volt_min | float -%}{%- set out.l = out.l + ['sub ' ~ n ~ ': napięcie ' ~ (v | round(2)) ~ ' V'] -%}{%- endif -%}
+                    {%- elif k == 'heard' and s.attributes.rssi is number and s.attributes.rssi < rssi_min | float -%}
+                      {%- set out.l = out.l + ['sub ' ~ n ~ ': słaby sygnał ' ~ s.attributes.rssi ~ ' dBm przy nodzie ' ~ s.state] -%}
+                    {%- endif -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {%- for s in states.binary_sensor | selectattr('entity_id', 'search', '^binary_sensor\\.sensmos_lora_[0-9]+_silent$') | selectattr('state', 'eq', 'on') -%}
+                  {%- set n = (s.entity_id | regex_findall('_([0-9]+)_silent$'))[0] | int -%}
+                  {%- if n not in ignore -%}{%- set out.l = out.l + ['sub ' ~ n ~ ': milczy'] -%}{%- endif -%}
+                {%- endfor -%}
+                {{ out.l }}
+          - condition: "{{ lines | count > 0 }}"
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "Czujniki LoRa: {{ lines | count }} do sprawdzenia"
+                    message: "{{ lines | join('\n') }}"
+                    data: { tag: "sensmos-lora-report" }

@@ -167,6 +167,10 @@ data:
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Flokalizator.yaml)
 
+**Health of all your LoRa sensors** (Sensmos Hub 0.2.0-beta2 or newer): import [`czujniki_lora.yaml`](blueprints/automation/sensmos/czujniki_lora.yaml) once, not per sensor. You get a notification when any `sensmos_lora` sensor goes quiet and when it is back (the hub's `sensmos_lora_silent` and `sensmos_lora_back` events), and one summary a day listing weak batteries (`bat`, `batt`), low voltage (`v`, `vbat`, `volt`, `mv`), weak radio links (RSSI from the `_heard` entity) and sensors that are still silent. Nothing to report, no message. Skip sensors on a 12 V battery (car, camper) by their sub number.
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fczujniki_lora.yaml)
+
 Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
 
 ```yaml
