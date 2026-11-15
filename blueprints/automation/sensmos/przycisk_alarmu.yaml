@@ -20,7 +20,7 @@ blueprint:
           integration: sensmos
     sub:
       name: Button number (sub) / Numer przycisku (sub)
-      default: 4
+      default: 14
       selector:
         number:
           min: 1
