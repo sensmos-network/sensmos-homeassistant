@@ -8,7 +8,7 @@ Bring Sensmos into Home Assistant — three ways:
 - **🟣 Data only** — no hardware: push selected Home Assistant sensors straight to the [live map](https://sensmos.com/map/) as a software node (purple). Pick a passkey, choose entities, done.
 - **☁️ Sensmos account** — your LoRaWAN gateways (e.g. Crankk) paired in the Sensmos app become devices in HA, and HA is their base: it receives your LoRa sensors' frames and decrypts them itself.
 
-> Sensmos is a DePIN sensor network: nodes publish data to a live map, earn GALU, and can subscribe to each other.
+> Sensmos is a DePIN sensor network: nodes publish data to a live map, receive GALU allocations, and can subscribe to each other.
 
 ## Features
 
@@ -69,7 +69,7 @@ The sections below are for the **🔌 physical node** mode.
 
 Settings → Devices & Services → Sensmos → **Configure**:
 
-- **➕ Feed a native entity (`pub.*`)** — pick a network-rewarded native entity (with its unit), then a matching HA sensor; the picker is filtered to compatible sensors and units are converted automatically.
+- **➕ Feed a native entity (`pub.*`)** — pick a native entity the network counts for GALU allocation (with its unit), then a matching HA sensor; the picker is filtered to compatible sensors and units are converted automatically.
 - **➕ Feed a custom entity (`own.*`)** — a name + any HA sensor or binary sensor. Stored on the node as `own.<name>` (usable in node scripts). The unit is taken from the HA entity; binary states become `1`/`0`.
 - **➖ Remove a feed mapping**.
 

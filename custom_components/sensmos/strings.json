@@ -90,7 +90,7 @@
       },
       "feed_pub": {
         "title": "Pick a native node entity",
-        "description": "These are entities the network rewards. Pick one — in the next step you'll choose a matching Home Assistant sensor.",
+        "description": "These are entities the network counts for GALU allocation. Pick one — in the next step you'll choose a matching Home Assistant sensor.",
         "data": { "node_entity": "Native entity (unit)" }
       },
       "feed_pub_entity": {
