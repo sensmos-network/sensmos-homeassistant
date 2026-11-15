@@ -1,0 +1,208 @@
+blueprint:
+  name: Sensmos – przycisk alarmu do bliskich
+  description: >-
+    A LoRa alarm button (ESPHome recipe lora-przycisk.yaml) → your Sensmos node → Home Assistant, no Wi-Fi at the button.
+    Holding the button sends alarm=1. This blueprint notifies the first group of phones with an "I'm on it" action,
+    escalates to the second group if nobody answers, and when someone accepts it sends ack=1 back by the node's radio:
+    the button's LED stays on and it beeps, so the person knows help is coming. Two short presses cancel (alarm=0).
+    Neighbourly and family help only: it does NOT replace 112. /
+    Przycisk alarmu LoRa (przepis ESPHome lora-przycisk.yaml) → Twój nod Sensmos → Home Assistant. Powiadamia bliskich
+    z przyciskiem „Przyjmuję”, po braku odpowiedzi drugą grupę, a po przyjęciu odsyła radiem ack=1 do przycisku.
+    To pomoc rodzinna i sąsiedzka, nie zastępuje numeru 112.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/przycisk_alarmu.yaml
+  input:
+    node:
+      name: Node / Nod
+      description: The Sensmos node with a LoRa radio in the button's "hub:" (it hears the button and sends the confirmation).
+      selector:
+        device:
+          integration: sensmos
+    sub:
+      name: Button number (sub) / Numer przycisku (sub)
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 255
+          mode: box
+    who:
+      name: Where is the button / Gdzie jest przycisk
+      description: Shown in the notification, e.g. "Grandma's bedroom".
+      default: "Przycisk alarmu"
+      selector:
+        text:
+    notify_first:
+      name: Notify first / Powiadom najpierw
+      description: Notify services separated by commas, e.g. notify.mobile_app_anna, notify.mobile_app_piotr
+      selector:
+        text:
+    notify_second:
+      name: Then notify / Potem powiadom (optional)
+      description: Used when nobody in the first group accepts in time. Empty = keep reminding the first group.
+      default: ""
+      selector:
+        text:
+    escalate_min:
+      name: Escalate after (min) / Eskaluj po (min)
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: min
+
+mode: single
+max_exceeded: silent
+
+variables:
+  node: !input node
+  sub: !input sub
+  who: !input who
+  notify_first: !input notify_first
+  notify_second: !input notify_second
+  escalate_min: !input escalate_min
+  first: "{{ notify_first.split(',') | map('trim') | reject('eq', '') | list }}"
+  second: "{{ notify_second.split(',') | map('trim') | reject('eq', '') | list }}"
+
+trigger:
+  - platform: event
+    event_type: sensmos_lora_frame
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.event.data.device_id == node and (trigger.event.data.sub | int(0)) == (sub | int)
+         and (trigger.event.data.text or '') is search('(^|;)alarm=1(;|$)') }}
+
+action:
+  - variables:
+      dst: "{{ (trigger.event.data.node_id or '')[:8] }}"
+      ack_action: "SENSMOS_ALARM_ACK_{{ context.id }}"
+      t0: "{{ now().timestamp() | int }}"
+      tag: "sensmos-alarm-{{ sub }}"
+      msg_data:
+        tag: "{{ tag }}"
+        ttl: 0
+        priority: high
+        channel: Sensmos alarm
+        push:
+          interruption-level: time-sensitive
+        actions:
+          - action: "{{ ack_action }}"
+            title: Przyjmuję / I'm on it
+  - repeat:
+      for_each: "{{ first }}"
+      sequence:
+        - service: "{{ repeat.item }}"
+          continue_on_error: true
+          data:
+            title: "Alarm: {{ who }}"
+            message: Ktoś nacisnął przycisk alarmu. Naciśnij „Przyjmuję”, jeśli jedziesz. To nie zastępuje 112.
+            data: "{{ msg_data }}"
+  # Czekamy na „Przyjmuję” albo odwołanie z przycisku. Inne ramki (np. powtórki alarm=1 co minutę) tylko wznawiają czekanie.
+  - repeat:
+      sequence:
+        - wait_for_trigger:
+            - platform: event
+              event_type: mobile_app_notification_action
+              event_data:
+                action: "{{ ack_action }}"
+            - platform: event
+              event_type: sensmos_lora_frame
+          timeout: { seconds: 30 }
+          continue_on_timeout: true
+      until: >-
+        {{ (wait.trigger is not none and (wait.trigger.event.event_type == 'mobile_app_notification_action'
+             or (wait.trigger.event.data.device_id == node and (wait.trigger.event.data.sub | int(0)) == (sub | int)
+                 and (wait.trigger.event.data.text or '') is search('(^|;)alarm=0(;|$)'))))
+           or now().timestamp() > t0 + (escalate_min | int) * 60 }}
+  # Druga grupa (albo przypomnienie pierwszej), gdy nikt nie przyjął i alarm nie został odwołany.
+  - variables:
+      done: >-
+        {{ wait.trigger is not none and (wait.trigger.event.event_type == 'mobile_app_notification_action'
+           or (wait.trigger.event.data.device_id == node and (wait.trigger.event.data.sub | int(0)) == (sub | int)
+               and (wait.trigger.event.data.text or '') is search('(^|;)alarm=0(;|$)'))) }}
+  - if: "{{ not done }}"
+    then:
+      - repeat:
+          for_each: "{{ second if second else first }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              continue_on_error: true
+              data:
+                title: "Alarm: {{ who }} (nikt jeszcze nie przyjął)"
+                message: Ktoś nacisnął przycisk alarmu i nikt jeszcze nie odpowiedział. To nie zastępuje 112.
+                data: "{{ msg_data }}"
+      - repeat:
+          sequence:
+            - wait_for_trigger:
+                - platform: event
+                  event_type: mobile_app_notification_action
+                  event_data:
+                    action: "{{ ack_action }}"
+                - platform: event
+                  event_type: sensmos_lora_frame
+              timeout: { seconds: 30 }
+              continue_on_timeout: true
+          until: >-
+            {{ (wait.trigger is not none and (wait.trigger.event.event_type == 'mobile_app_notification_action'
+                 or (wait.trigger.event.data.device_id == node and (wait.trigger.event.data.sub | int(0)) == (sub | int)
+                     and (wait.trigger.event.data.text or '') is search('(^|;)alarm=0(;|$)'))))
+               or now().timestamp() > t0 + (escalate_min | int) * 60 + 1800 }}
+  - variables:
+      cancelled: >-
+        {{ wait.trigger is not none and wait.trigger.event.event_type == 'sensmos_lora_frame'
+           and wait.trigger.event.data.device_id == node and (wait.trigger.event.data.sub | int(0)) == (sub | int)
+           and (wait.trigger.event.data.text or '') is search('(^|;)alarm=0(;|$)') }}
+      accepted: "{{ wait.trigger is not none and wait.trigger.event.event_type == 'mobile_app_notification_action' }}"
+  - choose:
+      - conditions: "{{ accepted }}"
+        sequence:
+          - service: sensmos.lora_send
+            data:
+              device_id: "{{ node }}"
+              dst: "{{ dst }}"
+              sub: "{{ sub | int }}"
+              payload: "c={{ now().timestamp() | int }};ack=1"
+              aes: true
+          - repeat:
+              for_each: "{{ (first + second) | unique | list }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "Alarm: {{ who }} – przyjęty"
+                    message: Ktoś już jedzie. Przycisk dostał potwierdzenie.
+                    data: { tag: "{{ tag }}" }
+          # Przycisk powtarza alarm co minutę, dopóki nie usłyszy ack; zgubione potwierdzenie wysyłamy jeszcze raz.
+          - repeat:
+              count: 4
+              sequence:
+                - wait_for_trigger:
+                    - platform: event
+                      event_type: sensmos_lora_frame
+                  timeout: { seconds: 75 }
+                  continue_on_timeout: false
+                - if: >-
+                    {{ wait.trigger.event.data.device_id == node and (wait.trigger.event.data.sub | int(0)) == (sub | int)
+                       and (wait.trigger.event.data.text or '') is search('(^|;)alarm=1(;|$)') }}
+                  then:
+                    - service: sensmos.lora_send
+                      data:
+                        device_id: "{{ node }}"
+                        dst: "{{ dst }}"
+                        sub: "{{ sub | int }}"
+                        payload: "c={{ now().timestamp() | int }};ack=1"
+                        aes: true
+      - conditions: "{{ cancelled }}"
+        sequence:
+          - repeat:
+              for_each: "{{ (first + second) | unique | list }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "Alarm: {{ who }} – odwołany"
+                    message: Przycisk odwołał alarm (dwa krótkie naciśnięcia).
+                    data: { tag: "{{ tag }}" }

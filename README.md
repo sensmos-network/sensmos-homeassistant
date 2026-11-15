@@ -145,6 +145,10 @@ data:
 
 **Range test** (messenger firmware 0.18-kom): the app's range test sends `t #n` about once a minute while you walk; the same blueprint answers each one with a silent `ok #n` (no notification, your pending reply stays for the next message), and the messenger records how well it heard home. Update the blueprint after upgrading the messenger: re-import it from the button below.
 
+**Alarm button for your family** (ESPHome recipe [`lora-przycisk.yaml`](https://github.com/sensmos-network/sensmos-esphome/blob/main/examples/lora-przycisk.yaml)): a big button by a bed or in a workshop, on LoRa with no Wi-Fi there. Holding it for 2 s sends `alarm=1`. Import the blueprint [`przycisk_alarmu.yaml`](blueprints/automation/sensmos/przycisk_alarmu.yaml): it notifies the phones you list with an **I'm on it** action, escalates to a second group if nobody answers within a few minutes, and once someone accepts it sends `ack=1` back through the node's radio, so the button's LED stays on and it beeps. Two short presses cancel. This is help from family and neighbours. It does not replace 112.
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fprzycisk_alarmu.yaml)
+
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fkomunikator_dom.yaml)
 
 Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
