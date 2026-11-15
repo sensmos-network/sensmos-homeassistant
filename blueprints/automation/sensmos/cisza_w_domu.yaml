@@ -20,11 +20,15 @@ blueprint:
           multiple: true
     quiet_h:
       name: Quiet for (h) / Cisza przez (h)
+      description: >-
+        Hours without activity. Working alone in the field (a forest, a farm, a building site): pick the messenger's frame
+        sensor (sensor.<node>_lora_data_frame_sub_9) as the activity sensor and set e.g. 1 h; every message or range ping counts.
       default: 4
       selector:
         number:
-          min: 1
+          min: 0.5
           max: 24
+          step: 0.5
           unit_of_measurement: h
     day_start:
       name: Day starts / Dzień od
