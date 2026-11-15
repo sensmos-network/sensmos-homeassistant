@@ -1,0 +1,116 @@
+blueprint:
+  name: Sensmos – cisza w domu (opieka nad bliskimi)
+  description: >-
+    Notifies family when nothing has happened at home for too long during the day: no door opened, no fridge opened,
+    no motion. Works with any entities: Sensmos LoRa sensors (a door reed in the bathroom, a fridge contact on a board
+    without Wi-Fi), Zigbee, ESPHome or anything else. The notification has an "I'll check" action, and the others are
+    told that someone took it. After a Home Assistant restart the quiet time counts from the restart. Family care only: it is not certified tele-care and does not replace 112. /
+    Powiadamia bliskich, gdy w domu za długo nic się nie dzieje (drzwi, lodówka, ruch). Dowolne encje, także czujniki
+    Sensmos LoRa. To opieka rodzinna, nie certyfikowana teleopieka, nie zastępuje 112.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/cisza_w_domu.yaml
+  input:
+    activity:
+      name: Activity sensors / Czujniki aktywności
+      description: >-
+        Anything that changes when the person is active, e.g. sensor.sensmos_lora_2_door, binary_sensor.fridge,
+        binary_sensor.hall_motion. A change of state (or a new LoRa frame for event sensors) counts as activity.
+      selector:
+        entity:
+          multiple: true
+    quiet_h:
+      name: Quiet for (h) / Cisza przez (h)
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 24
+          unit_of_measurement: h
+    day_start:
+      name: Day starts / Dzień od
+      default: "07:00:00"
+      selector:
+        time:
+    day_end:
+      name: Day ends / Dzień do
+      default: "22:00:00"
+      selector:
+        time:
+    who:
+      name: Whose home / Czyj dom
+      default: "Mama"
+      selector:
+        text:
+    notify:
+      name: Notify / Powiadom
+      description: Notify services separated by commas, e.g. notify.mobile_app_anna, notify.mobile_app_piotr
+      selector:
+        text:
+
+mode: single
+max_exceeded: silent
+
+variables:
+  activity: !input activity
+  quiet_h: !input quiet_h
+  who: !input who
+  notify: !input notify
+  targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+  # Ostatnia aktywność: najnowsza zmiana stanu albo atrybutu (ramka LoRa zmienia atrybut ts) któregokolwiek czujnika.
+  last_active: >-
+    {% set ts = expand(activity) | map(attribute='last_updated') | list %}{{ (ts | max).timestamp() | int if ts else 0 }}
+
+trigger:
+  - platform: time_pattern
+    minutes: "/15"
+
+condition:
+  - condition: time
+    after: !input day_start
+    before: !input day_end
+  - condition: template
+    value_template: >-
+      {{ last_active | int(0) > 0 and now().timestamp() - (last_active | int) > (quiet_h | float) * 3600 }}
+  # Najwyżej jedno powiadomienie na jedną ciszę: po ostatnim uruchomieniu musiała być aktywność.
+  - condition: template
+    value_template: >-
+      {% set lt = this.attributes.last_triggered %}
+      {{ lt is none or as_timestamp(lt) < (last_active | int) }}
+
+action:
+  - variables:
+      check_action: "SENSMOS_QUIET_CHECK_{{ context.id }}"
+      hours: "{{ ((now().timestamp() - (last_active | int)) / 3600) | round(1) }}"
+  - repeat:
+      for_each: "{{ targets }}"
+      sequence:
+        - service: "{{ repeat.item }}"
+          continue_on_error: true
+          data:
+            title: "{{ who }}: cisza w domu"
+            message: >-
+              Od {{ hours }} h żaden czujnik nie zauważył ruchu ({{ (last_active | int) | timestamp_custom('%H:%M') }}
+              ostatnia aktywność). Zadzwoń albo zajrzyj.
+            data:
+              tag: sensmos-quiet
+              ttl: 0
+              priority: high
+              actions:
+                - action: "{{ check_action }}"
+                  title: Sprawdzam / I'll check
+  - wait_for_trigger:
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "{{ check_action }}"
+    timeout: { hours: 2 }
+    continue_on_timeout: false
+  - repeat:
+      for_each: "{{ targets }}"
+      sequence:
+        - service: "{{ repeat.item }}"
+          continue_on_error: true
+          data:
+            title: "{{ who }}: ktoś już sprawdza"
+            message: Ktoś z rodziny przyjął powiadomienie o ciszy w domu.
+            data: { tag: sensmos-quiet }

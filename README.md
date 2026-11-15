@@ -151,6 +151,10 @@ data:
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fprzycisk_alarmu.yaml)
 
+**Quiet at home** (care for an elderly relative): import [`cisza_w_domu.yaml`](blueprints/automation/sensmos/cisza_w_domu.yaml) and pick any entities that change when the person is active: a Sensmos LoRa door reed, a fridge contact, a Zigbee motion sensor. If none of them changes for the hours you set during the day, the family gets a notification with an **I'll check** action, and the others are told someone took it. One notification per quiet spell. This is family care, not certified tele-care, and it does not replace 112.
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fcisza_w_domu.yaml)
+
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fkomunikator_dom.yaml)
 
 Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
