@@ -149,6 +149,8 @@ data:
 
 **"I'm safe" to the whole family:** fill in *Family* in the blueprint (notify services, comma separated). A message like `jestem bezpieczny`, `jestem ok`, `I'm safe`, `bin sicher` or `estou bem` from the messenger goes to all of them at once: from a place with no mobile signal, by radio to your node, then out through your home's internet. No SMS gateway, no extra service.
 
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fkomunikator_dom.yaml)
+
 **Alarm button for your family** (ESPHome recipe [`lora-przycisk.yaml`](https://github.com/sensmos-network/sensmos-esphome/blob/main/examples/lora-przycisk.yaml)): a big button by a bed or in a workshop, on LoRa with no Wi-Fi there. Holding it for 2 s sends `alarm=1`. Import the blueprint [`przycisk_alarmu.yaml`](blueprints/automation/sensmos/przycisk_alarmu.yaml): it notifies the phones you list with an **I'm on it** action, escalates to a second group if nobody answers within a few minutes, and once someone accepts it sends `ack=1` back through the node's radio, so the button's LED stays on and it beeps. Two short presses cancel. This is help from family and neighbours. It does not replace 112.
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fprzycisk_alarmu.yaml)
@@ -161,7 +163,9 @@ data:
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fchlodnia.yaml)
 
-[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fkomunikator_dom.yaml)
+**Bike, trailer or machine tracker** (ESPHome recipe [`lora-lokalizator.yaml`](https://github.com/sensmos-network/sensmos-esphome/blob/main/examples/lora-lokalizator.yaml), or any pair of latitude and longitude sensors): import [`lokalizator.yaml`](blueprints/automation/sensmos/lokalizator.yaml), pick the two sensors and a zone. The position appears on the Home Assistant map as `device_tracker.sensmos_<name>`, and when the thing leaves the zone you get one notification with a map link that updates itself with every new position and is cleared when it is back. No SIM card or subscription: it works where a Sensmos node hears the board, so it guards the area around home, the garage or the yard, not the whole country.
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Flokalizator.yaml)
 
 Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
 

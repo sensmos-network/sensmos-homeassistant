@@ -1,0 +1,107 @@
+blueprint:
+  name: Sensmos – lokalizator (rower, przyczepa, maszyna)
+  description: >-
+    Puts a GPS position that arrives as two sensors (latitude and longitude, e.g. from the Sensmos LoRa recipe
+    lora-lokalizator.yaml) on the Home Assistant map as a device tracker, and warns when the thing leaves a zone.
+    One notification that updates itself with each new position (with a map link) while it is outside, and it is
+    cleared when the thing is back. No SIM card and no subscription: it works where a Sensmos node hears the board. /
+    Pozycja GPS z dwóch czujników (np. przepis LoRa lora-lokalizator.yaml) na mapie HA i ostrzeżenie, gdy rower albo
+    przyczepa wyjedzie poza strefę. Jedno powiadomienie, które samo się odświeża z linkiem do mapy.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/lokalizator.yaml
+  input:
+    lat:
+      name: Latitude sensor / Czujnik szerokości
+      description: E.g. sensor.sensmos_lora_17_lat
+      selector:
+        entity:
+          domain: sensor
+    lon:
+      name: Longitude sensor / Czujnik długości
+      description: E.g. sensor.sensmos_lora_17_lon
+      selector:
+        entity:
+          domain: sensor
+    name:
+      name: Name / Nazwa
+      description: Also the tracker id, e.g. Rower gives device_tracker.sensmos_rower.
+      default: Rower
+      selector:
+        text:
+    zone:
+      name: Zone / Strefa
+      description: Outside this zone you get a warning.
+      default: zone.home
+      selector:
+        entity:
+          domain: zone
+    margin_m:
+      name: Margin (m) / Zapas (m)
+      description: Added to the zone radius, so GPS jitter at the edge sends nothing.
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 2000
+          step: 50
+          unit_of_measurement: m
+    notify:
+      name: Notify / Powiadom
+      description: Notify services separated by commas, e.g. notify.mobile_app_owner. Leave empty for the map only.
+      default: ""
+      selector:
+        text:
+
+# Szerokość i długość z jednej ramki to dwa wyzwolenia: restart + krótka przerwa = jedno przebieg na ramkę.
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input lat
+  - platform: state
+    entity_id: !input lon
+
+action:
+  - delay: { seconds: 2 }
+  - variables:
+      lat_e: !input lat
+      lon_e: !input lon
+      name: !input name
+      zone: !input zone
+      margin_m: !input margin_m
+      notify: !input notify
+      targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+      la: "{{ states(lat_e) | float(none) }}"
+      lo: "{{ states(lon_e) | float(none) }}"
+      dev: "sensmos_{{ name | slugify }}"
+      tag: "sensmos-tracker-{{ name | slugify }}"
+  - condition: "{{ la is number and lo is number and not (la == 0 and lo == 0) }}"
+  - service: device_tracker.see
+    data:
+      dev_id: "{{ dev }}"
+      host_name: "{{ name }}"
+      gps: ["{{ la }}", "{{ lo }}"]
+      gps_accuracy: 20
+  - variables:
+      dist_m: "{{ (distance(la, lo, zone) * 1000) | round(0) if states[zone] is not none else 0 }}"
+      limit_m: "{{ (state_attr(zone, 'radius') | float(100)) + (margin_m | float) }}"
+      outside: "{{ dist_m > limit_m }}"
+  - repeat:
+      for_each: "{{ targets }}"
+      sequence:
+        - if: "{{ outside }}"
+          then:
+            - service: "{{ repeat.item }}"
+              continue_on_error: true
+              data:
+                title: "{{ name }}: poza strefą"
+                message: >-
+                  {{ (dist_m / 1000) | round(1) }} km od strefy {{ state_attr(zone, 'friendly_name') or zone }},
+                  {{ now().strftime('%H:%M') }}. Pozycja: https://www.openstreetmap.org/?mlat={{ la }}&mlon={{ lo }}#map=17/{{ la }}/{{ lo }}
+                data: { tag: "{{ tag }}", alert_once: true, priority: high, ttl: 0 }
+          else:
+            - service: "{{ repeat.item }}"
+              continue_on_error: true
+              data:
+                message: clear_notification
+                data: { tag: "{{ tag }}" }
