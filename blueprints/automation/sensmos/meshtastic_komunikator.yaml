@@ -1,0 +1,119 @@
+blueprint:
+  name: Sensmos – komunikator ↔ Meshtastic
+  description: >-
+    Two-way bridge between the Sensmos messenger (firmware 0.17-kom or newer) and a Meshtastic channel, through your
+    Home Assistant and a Meshtastic node with Wi-Fi at home (the MQTT gateway). A messenger message that starts with
+    "m " goes to the Meshtastic channel as "[name] text". Text from that channel waits in the reply helper and reaches
+    the messenger with its next "?" question or confirmation. Use it together with the blueprint "komunikator z domem
+    bez internetu" (same node, sub and reply helper), which confirms every message. Needs the Sensmos Hub Meshtastic
+    bridge (hub 0.2.0-beta6 or newer) and the MQTT integration. /
+    Most w obie strony między komunikatorem Sensmos (0.17-kom i nowszy) a kanałem Meshtastic, przez Twój Home
+    Assistant i nod Meshtastic z Wi-Fi w domu (bramka MQTT). Wiadomość z komunikatora zaczynająca się od „m ” idzie na
+    kanał Meshtastic jako „[imię] tekst”. Tekst z tego kanału czeka w pomocniku z odpowiedzią i dociera do
+    komunikatora z jego następnym pytaniem „?” albo potwierdzeniem. Działa razem z blueprintem „komunikator z domem
+    bez internetu” (ten sam nod, sub i pomocnik), który potwierdza każdą wiadomość.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/meshtastic_komunikator.yaml
+  input:
+    node:
+      name: Node at home / Nod w domu
+      description: The Sensmos node the messenger sends to, the same as in "komunikator z domem bez internetu".
+      selector:
+        device:
+          integration: sensmos
+    sub:
+      name: Messenger sensor number (sub) / Numer komunikatora (sub)
+      default: 9
+      selector:
+        number: { min: 1, max: 255, mode: box }
+    reply:
+      name: Reply helper / Pomocnik z odpowiedzią
+      description: The same input_text helper as in "komunikator z domem bez internetu" (max length 100 or more).
+      selector:
+        entity:
+          domain: input_text
+    name:
+      name: Name on Meshtastic / Imię na Meshtastic
+      description: Shown in front of the messenger's messages, e.g. "Piotr".
+      default: Komunikator
+      selector:
+        text:
+    gateway:
+      name: Meshtastic gateway node / Nod-bramka Meshtastic
+      description: >-
+        The id of the Meshtastic node with Wi-Fi that publishes to your MQTT broker, e.g. !7efeee00 (Meshtastic app →
+        node info). Its own echo is skipped.
+      selector:
+        text:
+    root:
+      name: MQTT root topic / Główny temat MQTT
+      description: As in the gateway's MQTT settings. The bridge publishes to <root>/2/json/mqtt/ (the trailing slash matters).
+      default: msh/EU_868
+      selector:
+        text:
+    channel:
+      name: Meshtastic channel index / Numer kanału Meshtastic
+      description: >-
+        0–7. Use your own private channel (e.g. 1 for "Rodzina"), not the public LongFast, so the messenger is not
+        flooded. Only text from this channel goes to the messenger.
+      default: 1
+      selector:
+        number: { min: 0, max: 7, mode: box }
+
+mode: queued
+max: 10
+
+variables:
+  node: !input node
+  sub: !input sub
+  reply_entity: !input reply
+  owner: !input name
+  gateway_in: !input gateway
+  root: !input root
+  mesh_channel: !input channel
+  gw_hex: "{{ gateway_in | lower | replace('!', '') | trim }}"
+  gw_num: "{{ gw_hex | int(0, 16) }}"
+  topic: "{{ root | trim | regex_replace('/+$', '') }}/2/json/mqtt/"
+
+trigger:
+  - platform: event
+    event_type: sensmos_lora_frame
+    id: kom
+  - platform: event
+    event_type: sensmos_meshtastic_message
+    id: mesh
+
+action:
+  - choose:
+      # Komunikator → Meshtastic: "#n m tekst" (potwierdzenie "ok #n" daje blueprint komunikator_dom).
+      - conditions:
+          - "{{ trigger.id == 'kom' }}"
+          - "{{ trigger.event.data.device_id == node and (trigger.event.data.sub | int(0)) == (sub | int) }}"
+          - "{{ (trigger.event.data.text or '') is search('^#\\d+ [mM] .') }}"
+          - "{{ gw_num | int > 0 }}"
+        sequence:
+          - service: mqtt.publish
+            data:
+              topic: "{{ topic }}"
+              payload: >-
+                {{ {'from': gw_num | int, 'type': 'sendtext', 'channel': mesh_channel | int,
+                    'payload': ('[' ~ owner ~ '] ' ~ (trigger.event.data.text | regex_replace('^#\\d+ [mM] ', '')))[:200]} | to_json }}
+      # Meshtastic → komunikator: tekst z wybranego kanału czeka w pomocniku (bez echa własnej bramki).
+      - conditions:
+          - "{{ trigger.id == 'mesh' }}"
+          - "{{ (trigger.event.data.channel | int(-1)) == (mesh_channel | int) }}"
+          - "{{ (trigger.event.data.node or '') | lower | replace('!', '') != gw_hex }}"
+          - "{{ (trigger.event.data.text or '') | trim != '' }}"
+        sequence:
+          - variables:
+              who: "{{ trigger.event.data.name or trigger.event.data.node }}"
+              line: "{{ who[:12] }}: {{ trigger.event.data.text | trim }}"
+              prev: >-
+                {% set p = states(reply_entity) %}{{ '' if p in ['unknown', 'unavailable', 'none'] else p }}
+              joined: "{{ (prev ~ ' / ' ~ line) if prev else line }}"
+          - service: input_text.set_value
+            target:
+              entity_id: "{{ reply_entity }}"
+            data:
+              # Komunikator pokazuje do 90 znaków odpowiedzi: najnowsze zostają.
+              value: "{{ joined[-90:] }}"
