@@ -1,0 +1,120 @@
+blueprint:
+  name: Sensmos – zalanie z zaworem odcinającym
+  description: >-
+    Water leak: one automation for all your leak probes (Sensmos LoRa _leak sensors, Zigbee, anything that turns on or 1).
+    It closes the main water valve if you have one (a valve entity, or a switch that is on while water flows), sends a
+    critical notification that breaks through silent mode, and repeats it every few minutes until someone taps "Checking"
+    or the probe dries. The valve opens again only by hand. /
+    Zalanie: jedna automatyzacja na wszystkie sondy (czujniki LoRa Sensmos _leak, Zigbee, cokolwiek, co przechodzi w on
+    albo 1). Zamyka główny zawór wody, jeśli go masz (encja zaworu albo przełącznik włączony, gdy woda płynie), wysyła
+    krytyczne powiadomienie przebijające tryb cichy i powtarza je co kilka minut, aż ktoś stuknie „Sprawdzam” albo sonda
+    wyschnie. Zawór otwierasz z powrotem tylko ręcznie.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/zalanie.yaml
+  input:
+    probes:
+      name: Leak probes / Sondy zalania
+      description: e.g. sensor.sensmos_lora_2_leak, sensor.sensmos_lora_7_leak, binary_sensor.kitchen_leak
+      selector:
+        entity:
+          multiple: true
+          domain: [sensor, binary_sensor]
+    valve:
+      name: Main valve (optional) / Główny zawór (opcjonalnie)
+      description: A valve entity (closed with valve.close_valve) or a switch that is on while water flows (turned off).
+      default: ""
+      selector:
+        entity:
+          domain: [valve, switch]
+    notify:
+      name: Notify / Powiadom
+      description: Mobile app notify services separated by commas, e.g. notify.mobile_app_owner, notify.mobile_app_anna
+      selector:
+        text:
+    repeat_min:
+      name: Repeat every (min) / Powtarzaj co (min)
+      default: 5
+      selector:
+        number: { min: 1, max: 30, unit_of_measurement: min }
+    repeat_max:
+      name: Repeat at most / Najwyżej powtórzeń
+      default: 6
+      selector:
+        number: { min: 1, max: 30 }
+
+mode: single
+max_exceeded: silent
+
+variables:
+  probes: !input probes
+  valve: !input valve
+  notify: !input notify
+  targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+  repeat_min: !input repeat_min
+  repeat_max: !input repeat_max
+  wet: "{{ ['on', '1', '1.0', 'wet', 'true'] }}"
+  ack: "SENSMOS_LEAK_ACK_{{ context.id }}"
+
+trigger:
+  - platform: state
+    entity_id: !input probes
+
+condition:
+  - "{{ trigger.to_state.state | lower in wet and (trigger.from_state is none or trigger.from_state.state | lower not in wet) }}"
+
+action:
+  - variables:
+      where: "{{ trigger.to_state.attributes.friendly_name or trigger.entity_id }}"
+  # Najpierw zawór, potem powiadomienia: każda minuta to litry na podłodze.
+  - if: "{{ valve != '' }}"
+    then:
+      - if: "{{ valve.startswith('valve.') }}"
+        then:
+          - service: valve.close_valve
+            target: { entity_id: "{{ valve }}" }
+            continue_on_error: true
+        else:
+          - service: switch.turn_off
+            target: { entity_id: "{{ valve }}" }
+            continue_on_error: true
+  - repeat:
+      sequence:
+        - repeat:
+            for_each: "{{ targets }}"
+            sequence:
+              - service: "{{ repeat.item }}"
+                continue_on_error: true
+                data:
+                  title: "Zalanie: {{ where }}"
+                  message: >-
+                    Woda na sondzie {{ where }}.{{ ' Główny zawór zamknięty.' if valve != '' else '' }}
+                    Stuknij „Sprawdzam”, gdy ktoś idzie zobaczyć.
+                  data:
+                    tag: "sensmos-zalanie"
+                    ttl: 0
+                    priority: high
+                    channel: alarm_stream
+                    push:
+                      sound: { name: default, critical: 1, volume: 1.0 }
+                    actions:
+                      - action: "{{ ack }}"
+                        title: Sprawdzam / Checking
+        - wait_for_trigger:
+            - platform: event
+              event_type: mobile_app_notification_action
+              event_data: { action: "{{ ack }}" }
+          timeout: { minutes: "{{ repeat_min | int }}" }
+          continue_on_timeout: true
+      until:
+        - "{{ wait.trigger is not none or states(trigger.entity_id) | lower not in wet or repeat.index >= repeat_max | int }}"
+  - if: "{{ wait.trigger is not none }}"
+    then:
+      - repeat:
+          for_each: "{{ targets }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              continue_on_error: true
+              data:
+                title: "Zalanie: {{ where }}"
+                message: "Ktoś już sprawdza.{{ ' Zawór zostaje zamknięty, otwórz go ręcznie po usunięciu wycieku.' if valve != '' else '' }}"
+                data: { tag: "sensmos-zalanie" }

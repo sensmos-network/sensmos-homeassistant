@@ -175,6 +175,18 @@ data:
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fczujniki_lora.yaml)
 
+**Frost in the garden** (any thermometer, e.g. the weather station recipe [`lora-pogoda.yaml`](https://github.com/sensmos-network/sensmos-esphome/blob/main/examples/lora-pogoda.yaml)): import [`przymrozek.yaml`](blueprints/automation/sensmos/przymrozek.yaml). In the evening it reads the next 15 hours of your weather integration's forecast (`weather.get_forecasts`, hourly, falling back to daily) and warns when it drops to the threshold (default +1 °C at 2 m, which often means frost on the ground). At night it warns once more when the real thermometer stays below the threshold for 15 minutes. Only in the months you pick (default April–June and September–October).
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fprzymrozek.yaml)
+
+**Water leak with a shut-off valve** (Sensmos `_leak` probes from the garage guard or camper recipes, or any Zigbee probe): import [`zalanie.yaml`](blueprints/automation/sensmos/zalanie.yaml) once for all probes. It first closes the main valve (a `valve` entity, or a `switch` that is on while water flows), then sends a critical notification (iOS critical sound, Android alarm stream) and repeats it every 5 minutes until someone taps *Checking* or the probe dries. The valve stays closed until you open it by hand.
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fzalanie.yaml)
+
+**Chicken coop door** (ESPHome recipe [`lora-przelacznik.yaml`](https://github.com/sensmos-network/sensmos-esphome/blob/main/examples/lora-przelacznik.yaml) with a relay driving a linear actuator or a coop door motor): import [`kurnik.yaml`](blueprints/automation/sensmos/kurnik.yaml). It opens after sunrise (never before the time you set) and closes after sunset over radio through your node with LoRa, waits for the board's confirmation, tries once more, and notifies you before the night if the board does not confirm or the optional door contact disagrees. Two commands a day, about 1 s on air each.
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fkurnik.yaml)
+
 Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
 
 ```yaml

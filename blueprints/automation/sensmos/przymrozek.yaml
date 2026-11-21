@@ -1,0 +1,140 @@
+blueprint:
+  name: Sensmos – przymrozek w ogrodzie
+  description: >-
+    Frost warning for the garden, the greenhouse or the allotment: in the evening it checks the night forecast of your
+    weather integration, and during the night it watches a real thermometer (any temperature sensor, e.g. a Sensmos
+    LoRa sensor on the allotment). One alert when the forecast says frost and one when the thermometer drops below the
+    threshold, only in the months you pick. /
+    Ostrzeżenie przed przymrozkiem w ogrodzie, szklarni albo na działce: wieczorem sprawdza nocną prognozę Twojej
+    integracji pogody, a w nocy pilnuje prawdziwego termometru (dowolny czujnik temperatury, np. czujnik LoRa Sensmos
+    na działce). Jedno ostrzeżenie, gdy prognoza mówi o przymrozku, i jedno, gdy termometr zejdzie pod próg, tylko w
+    wybranych miesiącach.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/przymrozek.yaml
+  input:
+    temperature:
+      name: Thermometer / Termometr
+      description: Best 0.5–2 m above the plants, in the shade, e.g. sensor.sensmos_lora_19_t.
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+    weather:
+      name: Weather forecast (optional) / Prognoza pogody (opcjonalnie)
+      description: Any weather entity with a forecast (Met.no, OpenWeatherMap…). Empty = thermometer only.
+      default: ""
+      selector:
+        entity:
+          domain: weather
+    threshold:
+      name: Warn at or below (°C) / Ostrzegaj od (°C)
+      description: >-
+        +1 °C in the air at 2 m often means frost on the ground. / +1 °C w powietrzu na 2 m często oznacza przymrozek
+        przy ziemi.
+      default: 1
+      selector:
+        number: { min: -5, max: 5, step: 0.5, unit_of_measurement: "°C" }
+    check_time:
+      name: Evening forecast check / Wieczorne sprawdzenie prognozy
+      default: "18:00:00"
+      selector:
+        time:
+    months:
+      name: Active months / Aktywne miesiące
+      default: ["4", "5", "6", "9", "10"]
+      selector:
+        select:
+          multiple: true
+          options:
+            - { label: "1", value: "1" }
+            - { label: "2", value: "2" }
+            - { label: "3", value: "3" }
+            - { label: "4", value: "4" }
+            - { label: "5", value: "5" }
+            - { label: "6", value: "6" }
+            - { label: "7", value: "7" }
+            - { label: "8", value: "8" }
+            - { label: "9", value: "9" }
+            - { label: "10", value: "10" }
+            - { label: "11", value: "11" }
+            - { label: "12", value: "12" }
+    notify:
+      name: Notify / Powiadom
+      description: Notify services separated by commas, e.g. notify.mobile_app_owner
+      selector:
+        text:
+
+mode: single
+
+variables:
+  temp_entity: !input temperature
+  weather_entity: !input weather
+  threshold: !input threshold
+  months: !input months
+  notify: !input notify
+  targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+
+trigger:
+  - platform: time
+    at: !input check_time
+    id: forecast
+  - platform: numeric_state
+    entity_id: !input temperature
+    below: !input threshold
+    for: { minutes: 15 }
+    id: now
+
+condition:
+  - "{{ (now().month | string) in months }}"
+
+action:
+  - choose:
+      - conditions: "{{ trigger.id == 'forecast' and weather_entity != '' }}"
+        sequence:
+          - service: weather.get_forecasts
+            target: { entity_id: "{{ weather_entity }}" }
+            data: { type: hourly }
+            response_variable: fc
+            continue_on_error: true
+          - variables:
+              hours: >-
+                {% set f = (fc[weather_entity].forecast if fc is defined and weather_entity in fc else []) %}
+                {{ f[:15] | selectattr('temperature', 'number') | map(attribute='temperature') | list }}
+          - if: "{{ hours | count == 0 }}"
+            then:
+              - service: weather.get_forecasts
+                target: { entity_id: "{{ weather_entity }}" }
+                data: { type: daily }
+                response_variable: fd
+                continue_on_error: true
+          - variables:
+              low: >-
+                {% if hours | count > 0 %}{{ hours | min }}
+                {% else %}{% set d = (fd[weather_entity].forecast if fd is defined and weather_entity in fd else []) %}
+                {{ (d | selectattr('templow', 'number') | map(attribute='templow') | list + [99]) | first }}{% endif %}
+          - condition: "{{ low | float(99) <= threshold | float }}"
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "Przymrozek w nocy: {{ low | float | round(1) }} °C"
+                    message: >-
+                      Prognoza na noc {{ low | float | round(1) }} °C (próg {{ threshold }} °C). Okryj rośliny
+                      agrowłókniną, zamknij szklarnię, schowaj donice. Teraz {{ states(temp_entity) }} °C.
+                    data: { tag: "sensmos-przymrozek" }
+      # Termometr: wyzwalacz numeric_state odpala raz przy zejściu pod próg (na 15 min), nie co odczyt.
+      - conditions: "{{ trigger.id == 'now' }}"
+        sequence:
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - service: "{{ repeat.item }}"
+                  continue_on_error: true
+                  data:
+                    title: "Przymrozek: {{ states(temp_entity) }} °C"
+                    message: >-
+                      {{ state_attr(temp_entity, 'friendly_name') or temp_entity }} od 15 min poniżej {{ threshold }} °C.
+                      Jeśli rośliny nie są okryte, to ostatni moment.
+                    data: { tag: "sensmos-przymrozek", priority: high, ttl: 0 }

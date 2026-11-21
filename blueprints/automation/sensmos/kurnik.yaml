@@ -1,0 +1,139 @@
+blueprint:
+  name: Sensmos – kurnik, drzwiczki o świcie i zmierzchu
+  description: >-
+    Chicken coop door with no Wi-Fi at the coop: opens after sunrise and closes after sunset by radio, through your
+    Sensmos node with LoRa and the ESPHome recipe lora-przelacznik.yaml (a relay driving a linear actuator or a coop
+    door motor). After each command it waits for the board's confirmation and tries once more; if the door still does
+    not answer, or the optional door contact says it is not closed, you get a notification before the night. /
+    Drzwiczki kurnika bez Wi-Fi przy kurniku: otwierają się po wschodzie i zamykają po zachodzie słońca radiem, przez
+    Twój nod Sensmos z LoRa i przepis ESPHome lora-przelacznik.yaml (przekaźnik siłownika albo silnika drzwiczek).
+    Po każdym poleceniu czeka na potwierdzenie płytki i próbuje jeszcze raz; jeśli drzwiczki dalej nie odpowiadają
+    albo opcjonalny kontaktron mówi, że nie są zamknięte, dostajesz powiadomienie przed nocą.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/kurnik.yaml
+  input:
+    node:
+      name: Node with LoRa / Nod z LoRa
+      description: The Sensmos node that sends the command (its id8 is in the board's `hub:`).
+      selector:
+        device:
+          integration: sensmos
+    dst:
+      name: Node id8 / id8 noda
+      description: The same 8 characters as `hub:` in the board's YAML, e.g. a1b2c3d4.
+      selector:
+        text:
+    sub:
+      name: Board number (sub) / Numer płytki (sub)
+      default: 5
+      selector:
+        number: { min: 1, max: 255, mode: box }
+    key:
+      name: Switch key / Klucz przełącznika
+      description: As `key:` under `switches:` in the board's YAML. 1 = open, 0 = close.
+      default: relay
+      selector:
+        text:
+    state:
+      name: Board state / Stan płytki
+      description: The node's sensor with this board's frames, e.g. sensor.home_node_lora_data_frame_sub_5.
+      selector:
+        entity:
+          domain: sensor
+    open_offset:
+      name: Open after sunrise / Otwórz po wschodzie
+      default: "00:30:00"
+      selector:
+        time:
+    open_earliest:
+      name: Never open before / Nigdy przed
+      description: In June the sun rises before 5. / W czerwcu słońce wschodzi przed 5.
+      default: "06:30:00"
+      selector:
+        time:
+    close_offset:
+      name: Close after sunset / Zamknij po zachodzie
+      description: Hens go in by themselves at dusk; give them time. / Kury wchodzą same o zmierzchu, daj im czas.
+      default: "00:30:00"
+      selector:
+        time:
+    contact:
+      name: Door contact (optional) / Kontaktron drzwiczek (opcjonalnie)
+      description: Any sensor that is on/1 while the door is open, e.g. sensor.sensmos_lora_8_drzwi.
+      default: ""
+      selector:
+        entity:
+          domain: [sensor, binary_sensor]
+    notify:
+      name: Notify / Powiadom
+      description: Notify services separated by commas.
+      selector:
+        text:
+
+mode: queued
+max: 4
+
+variables:
+  node: !input node
+  dst: !input dst
+  sub: !input sub
+  key: !input key
+  state_entity: !input state
+  contact: !input contact
+  notify: !input notify
+  targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+  open_earliest: !input open_earliest
+
+trigger:
+  - platform: sun
+    event: sunrise
+    offset: !input open_offset
+    id: open
+  - platform: time
+    at: !input open_earliest
+    id: open
+  - platform: sun
+    event: sunset
+    offset: !input close_offset
+    id: close
+
+action:
+  - variables:
+      want: "{{ 1 if trigger.id == 'open' else 0 }}"
+      # Otwieranie dopiero, gdy słońce jest nad horyzontem i minęła godzina „nigdy przed”; który wyzwalacz przyjdzie
+      # drugi, ten otwiera.
+      after_sunrise: "{{ is_state('sun.sun', 'above_horizon') }}"
+      is_set: "{{ (key ~ '=' ~ want) in (states(state_entity) or '').split(';') }}"
+  - condition: "{{ trigger.id == 'close' or (now().strftime('%H:%M:%S') >= open_earliest and after_sunrise) }}"
+  - condition: "{{ not is_set }}"
+  - repeat:
+      sequence:
+        - service: sensmos.lora_send
+          data:
+            device_id: "{{ node }}"
+            dst: "{{ dst | trim | lower }}"
+            sub: "{{ sub | int }}"
+            payload: "c={{ now().timestamp() | int }};{{ key }}={{ want }}"
+            aes: true
+        - wait_template: "{{ (key ~ '=' ~ want) in (states(state_entity) or '').split(';') }}"
+          timeout: { minutes: 2 }
+      until:
+        - "{{ wait.completed or repeat.index >= 2 }}"
+  - delay: { seconds: 90 }
+  - variables:
+      confirmed: "{{ (key ~ '=' ~ want) in (states(state_entity) or '').split(';') }}"
+      door_open: "{{ contact != '' and states(contact) | lower in ['on', '1', '1.0', 'open'] }}"
+      door_bad: "{{ contact != '' and ((want == 0 and door_open) or (want == 1 and not door_open)) }}"
+  - if: "{{ not confirmed or door_bad }}"
+    then:
+      - repeat:
+          for_each: "{{ targets }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              continue_on_error: true
+              data:
+                title: "Kurnik: drzwiczki {{ 'nie otworzyły się' if want == 1 else 'NIE ZAMKNIĘTE' }}"
+                message: >-
+                  {{ 'Płytka nie potwierdziła polecenia (dwie próby radiem).' if not confirmed else 'Kontaktron mówi co innego niż polecenie.' }}
+                  {{ 'Sprawdź przed nocą: lis i kuna nie czekają.' if want == 0 else 'Kury czekają w środku.' }}
+                data: { tag: "sensmos-kurnik", priority: high }
