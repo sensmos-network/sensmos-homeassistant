@@ -187,6 +187,14 @@ data:
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fkurnik.yaml)
 
+**Watering with the weather** (ESPHome recipe [`lora-szklarnia.yaml`](https://github.com/sensmos-network/sensmos-esphome/blob/main/examples/lora-szklarnia.yaml) with a valve on a relay): import [`podlewanie.yaml`](blueprints/automation/sensmos/podlewanie.yaml). At the time you set it opens the valve over radio for the set minutes, but skips the day when the soil is still moist, when today's rain (e.g. the `rain_today` meter of the weather station recipe) is enough or when the hourly forecast brings rain in the next 12 hours. Opening and closing are both confirmed by the board; if the close is not confirmed you get a high-priority notification (the board still closes by itself after its `max_open`).
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fpodlewanie.yaml)
+
+**Commands for a board on a battery** (ESPHome recipe [`lora-uspiona.yaml`](https://github.com/sensmos-network/sensmos-esphome/blob/main/examples/lora-uspiona.yaml), which listens for 30 s after each frame): import [`polecenie_po_wybudzeniu.yaml`](blueprints/automation/sensmos/polecenie_po_wybudzeniu.yaml). Flip an `input_boolean` helper; the command waits in HA and goes out through your node with LoRa as soon as the board's next frame arrives, and again after every frame until the board reports the new value. Optional switch-off after N minutes (60 for the recipe's fast reports).
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsensmos-network%2Fsensmos-homeassistant%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fsensmos%2Fpolecenie_po_wybudzeniu.yaml)
+
 Emergency automation — when the node goes off-grid, put a status text into one of its emergency entities so the owner sees it in the app over LoRa (values are ASCII, max 8 chars):
 
 ```yaml

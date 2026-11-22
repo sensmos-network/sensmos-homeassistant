@@ -1,0 +1,194 @@
+blueprint:
+  name: Sensmos – podlewanie z pogodą
+  description: >-
+    Waters the garden or greenhouse at a set time by radio, through your Sensmos node with LoRa and the ESPHome recipe
+    lora-szklarnia.yaml (a valve on a relay), but skips the day when the soil is still moist, when it has already
+    rained enough today (e.g. the rain_today meter of the weather station recipe) or when the forecast promises rain.
+    It opens the valve, waits for the board's confirmation, closes it after the set time and checks again. The board
+    also closes the valve by itself after its max_open, even with no radio. /
+    Podlewa ogród albo szklarnię o stałej godzinie radiem, przez Twój nod Sensmos z LoRa i przepis ESPHome
+    lora-szklarnia.yaml (zawór na przekaźniku), ale opuszcza dzień, gdy gleba jest jeszcze wilgotna, gdy dziś już
+    napadało dość deszczu (np. licznik rain_today ze stacji pogodowej) albo gdy prognoza obiecuje deszcz. Otwiera
+    zawór, czeka na potwierdzenie płytki, zamyka po zadanym czasie i znów sprawdza. Płytka i tak sama zamyka zawór po
+    swoim max_open, nawet bez radia.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/podlewanie.yaml
+  input:
+    node:
+      name: Node with LoRa / Nod z LoRa
+      description: The Sensmos node that sends the command (its id8 is in the board's `hub:`).
+      selector:
+        device:
+          integration: sensmos
+    dst:
+      name: Node id8 / id8 noda
+      description: The same 8 characters as `hub:` in the board's YAML, e.g. a1b2c3d4.
+      selector:
+        text:
+    sub:
+      name: Board number (sub) / Numer płytki (sub)
+      default: 10
+      selector:
+        number: { min: 1, max: 255, mode: box }
+    key:
+      name: Valve key / Klucz zaworu
+      description: As `key:` under `switches:` in the board's YAML. / Jak `key:` pod `switches:` w YAML płytki.
+      default: valve
+      selector:
+        text:
+    state:
+      name: Board state / Stan płytki
+      description: The node's sensor with this board's frames, e.g. sensor.home_node_lora_data_frame_sub_10.
+      selector:
+        entity:
+          domain: sensor
+    at:
+      name: Watering time / Godzina podlewania
+      description: Early morning loses the least water. / Wcześnie rano najmniej wody paruje.
+      default: "05:30:00"
+      selector:
+        time:
+    minutes:
+      name: Watering time in minutes / Czas podlewania w minutach
+      description: Keep it below the board's max_open (20 min in the recipe). / Krócej niż max_open płytki.
+      default: 10
+      selector:
+        number: { min: 1, max: 120, mode: box, unit_of_measurement: min }
+    soil:
+      name: Soil moisture (optional) / Wilgotność gleby (opcjonalnie)
+      description: e.g. sensor.sensmos_lora_10_soil
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    soil_wet:
+      name: Skip when soil is at least (%) / Pomiń, gdy gleba ma co najmniej (%)
+      default: 40
+      selector:
+        number: { min: 0, max: 100, mode: box, unit_of_measurement: "%" }
+    rain_today:
+      name: Rain today (optional) / Deszcz dziś (opcjonalnie)
+      description: A daily utility_meter on the weather station's rain, in mm. / Dzienny utility_meter deszczu, w mm.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    rain_skip:
+      name: Skip after rain of (mm) / Pomiń po deszczu (mm)
+      default: 3
+      selector:
+        number: { min: 0, max: 50, step: 0.5, mode: box, unit_of_measurement: mm }
+    weather:
+      name: Weather forecast (optional) / Prognoza pogody (opcjonalnie)
+      default: ""
+      selector:
+        entity:
+          domain: weather
+    forecast_skip:
+      name: Skip when the next 12 h bring (mm) / Pomiń, gdy w 12 h spadnie (mm)
+      default: 3
+      selector:
+        number: { min: 0, max: 50, step: 0.5, mode: box, unit_of_measurement: mm }
+    notify:
+      name: Notify (optional) / Powiadom (opcjonalnie)
+      description: Notify services separated by commas; only problems are sent. / Tylko problemy.
+      default: ""
+      selector:
+        text:
+
+mode: single
+
+variables:
+  node: !input node
+  dst: !input dst
+  sub: !input sub
+  key: !input key
+  state_entity: !input state
+  minutes: !input minutes
+  soil: !input soil
+  soil_wet: !input soil_wet
+  rain_today: !input rain_today
+  rain_skip: !input rain_skip
+  weather: !input weather
+  forecast_skip: !input forecast_skip
+  notify: !input notify
+  targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+
+trigger:
+  - platform: time
+    at: !input at
+
+action:
+  - variables:
+      soil_now: "{{ states(soil) | float(-1) if soil else -1 }}"
+      rain_now: "{{ states(rain_today) | float(0) if rain_today else 0 }}"
+  - condition: "{{ not (soil and soil_now >= (soil_wet | float)) }}"
+  - condition: "{{ not (rain_today and rain_now >= (rain_skip | float)) }}"
+  - if: "{{ weather != '' }}"
+    then:
+      - service: weather.get_forecasts
+        continue_on_error: true
+        target:
+          entity_id: "{{ weather }}"
+        data:
+          type: hourly
+        response_variable: fc
+      - variables:
+          coming: >-
+            {% set f = (fc[weather].forecast if fc is defined and weather in fc else []) %}
+            {{ f[:12] | map(attribute='precipitation') | map('float', 0) | sum | round(1) }}
+      - condition: "{{ coming | float(0) < (forecast_skip | float) }}"
+  # Otwórz i poczekaj na potwierdzenie (dwie próby radiem).
+  - repeat:
+      sequence:
+        - service: sensmos.lora_send
+          data:
+            device_id: "{{ node }}"
+            dst: "{{ dst | trim | lower }}"
+            sub: "{{ sub | int }}"
+            payload: "c={{ now().timestamp() | int }};{{ key }}=1"
+            aes: true
+        - wait_template: "{{ (key ~ '=1') in (states(state_entity) or '').split(';') }}"
+          timeout: { minutes: 2 }
+      until:
+        - "{{ wait.completed or repeat.index >= 2 }}"
+  - if: "{{ not wait.completed }}"
+    then:
+      - repeat:
+          for_each: "{{ targets }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              continue_on_error: true
+              data:
+                title: "Podlewanie: zawór się nie otworzył"
+                message: "Płytka nie potwierdziła otwarcia (dwie próby radiem). Dziś bez podlewania."
+                data: { tag: "sensmos-podlewanie" }
+      - stop: "Brak potwierdzenia otwarcia"
+  - delay:
+      minutes: "{{ minutes | int }}"
+  - repeat:
+      sequence:
+        - service: sensmos.lora_send
+          data:
+            device_id: "{{ node }}"
+            dst: "{{ dst | trim | lower }}"
+            sub: "{{ sub | int }}"
+            payload: "c={{ now().timestamp() | int }};{{ key }}=0"
+            aes: true
+        - wait_template: "{{ (key ~ '=0') in (states(state_entity) or '').split(';') }}"
+          timeout: { minutes: 2 }
+      until:
+        - "{{ wait.completed or repeat.index >= 3 }}"
+  - if: "{{ not wait.completed }}"
+    then:
+      - repeat:
+          for_each: "{{ targets }}"
+          sequence:
+            - service: "{{ repeat.item }}"
+              continue_on_error: true
+              data:
+                title: "Podlewanie: brak potwierdzenia zamknięcia"
+                message: >-
+                  Płytka nie potwierdziła zamknięcia zaworu. Sama zamknie go po max_open, ale sprawdź,
+                  czy woda nie leje się dalej.
+                data: { tag: "sensmos-podlewanie", priority: high }

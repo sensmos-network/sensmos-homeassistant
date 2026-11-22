@@ -1,0 +1,104 @@
+blueprint:
+  name: Sensmos – polecenie dla płytki na baterii (po wybudzeniu)
+  description: >-
+    Commands for a LoRa board that sleeps on a battery and cannot listen all the time. You flip an input_boolean
+    helper; the command waits in Home Assistant, and the next time the board wakes up and sends its frame, your
+    Sensmos node with LoRa sends the new value by radio while the board is still listening (ESPHome recipe
+    lora-uspiona.yaml, 30 s after each frame). The board confirms it in its next frame, and until then the command is
+    sent again after every frame. Optional automatic switch-off, e.g. one hour of fast reports. /
+    Polecenia dla płytki LoRa, która śpi na baterii i nie słucha cały czas. Przestawiasz pomocnik input_boolean;
+    polecenie czeka w Home Assistant, a gdy płytka się obudzi i wyśle ramkę, Twój nod Sensmos z LoRa od razu nadaje
+    nową wartość, póki płytka jeszcze słucha (przepis ESPHome lora-uspiona.yaml, 30 s po każdej ramce). Płytka
+    potwierdza ją następną ramką, a do tego czasu polecenie idzie ponownie po każdej ramce. Opcjonalne samo
+    wyłączenie, np. godzina szybkich raportów.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/polecenie_po_wybudzeniu.yaml
+  input:
+    node:
+      name: Node with LoRa / Nod z LoRa
+      description: >-
+        The Sensmos node in the board's `hub:`; it hears the board and sends the command. A Hub has no radio and
+        cannot send. / Nod Sensmos z `hub:` płytki; słyszy płytkę i nadaje polecenie. Hub nie ma radia.
+      selector:
+        device:
+          integration: sensmos
+    dst:
+      name: Node id8 / id8 noda
+      description: The same 8 characters as `hub:` in the board's YAML, e.g. a1b2c3d4.
+      selector:
+        text:
+    sub:
+      name: Board number (sub) / Numer płytki (sub)
+      default: 22
+      selector:
+        number: { min: 1, max: 255, mode: box }
+    key:
+      name: Switch key / Klucz przełącznika
+      description: As `key:` under `switches:` in the board's YAML. / Jak `key:` pod `switches:` w YAML płytki.
+      default: fast
+      selector:
+        text:
+    helper:
+      name: Wanted state / Żądany stan
+      description: An input_boolean helper you flip from the dashboard (on = 1, off = 0).
+      selector:
+        entity:
+          domain: input_boolean
+    auto_off:
+      name: Switch off after (minutes) / Wyłącz po (minutach)
+      description: 0 = never. For fast reports 60 is a good value. / 0 = nigdy. Dla szybkich raportów dobre 60.
+      default: 60
+      selector:
+        number: { min: 0, max: 1440, mode: box, unit_of_measurement: min }
+
+mode: queued
+max: 5
+
+variables:
+  node: !input node
+  dst: !input dst
+  sub: !input sub
+  key: !input key
+  helper: !input helper
+  auto_off: !input auto_off
+
+trigger:
+  - platform: event
+    event_type: sensmos_lora_frame
+    id: frame
+  - platform: state
+    entity_id: !input helper
+    to: "on"
+    for:
+      minutes: !input auto_off
+    id: timeout
+
+action:
+  - choose:
+      - conditions:
+          - "{{ trigger.id == 'timeout' and (auto_off | int(0)) > 0 }}"
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: "{{ helper }}"
+      - conditions:
+          - "{{ trigger.id == 'frame' }}"
+          - "{{ trigger.event.data.device_id == node and (trigger.event.data.sub | int(0)) == (sub | int) }}"
+        sequence:
+          - variables:
+              pairs: >-
+                {% set ns = namespace(v='') %}
+                {% for p in (trigger.event.data.text or '').split(';') %}
+                  {% if p.split('=')[0] | trim == key %}{% set ns.v = p.split('=')[1] | default('') | trim %}{% endif %}
+                {% endfor %}{{ ns.v }}
+              have: "{{ pairs | int(-1) }}"
+              want: "{{ 1 if is_state(helper, 'on') else 0 }}"
+          # Płytka, która nie podaje tego klucza (inny przepis), nie dostaje nic.
+          - condition: "{{ have | int >= 0 and have | int != want | int }}"
+          - service: sensmos.lora_send
+            data:
+              device_id: "{{ node }}"
+              dst: "{{ dst | trim | lower }}"
+              sub: "{{ sub | int }}"
+              payload: "c={{ now().timestamp() | int }};{{ key }}={{ want }}"
+              aes: true
