@@ -1,0 +1,132 @@
+blueprint:
+  name: Sensmos – brama albo garaż otwarte po zmroku
+  description: >-
+    Notifies you when a gate, garage door or shed door is still open after dark (a LoRa reed switch from the garage
+    guard, mailbox or coop recipe, or any other sensor). With a Sensmos node with LoRa and a relay board
+    (lora-przelacznik.yaml) on the gate, the notification has a "Close" button that closes it by radio and tells you
+    whether the contact confirmed it. /
+    Powiadamia, gdy brama, garaż albo szopa są po zmroku dalej otwarte (kontaktron LoRa z przepisu strażnika garażu,
+    skrzynki albo kurnika, albo dowolny inny czujnik). Z nodem Sensmos z LoRa i płytką z przekaźnikiem
+    (lora-przelacznik.yaml) przy bramie powiadomienie ma przycisk „Zamknij”, który zamyka ją radiem i mówi, czy
+    kontaktron to potwierdził.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/brama_otwarta.yaml
+  input:
+    contact:
+      name: Gate contact / Kontaktron bramy
+      description: On/1 while open, e.g. sensor.sensmos_lora_2_door. / Włączony albo 1, gdy otwarte.
+      selector:
+        entity:
+          domain: [sensor, binary_sensor]
+    name:
+      name: Name / Nazwa
+      default: Brama
+      selector:
+        text:
+    after_sunset:
+      name: Check after sunset / Sprawdź po zachodzie
+      default: "00:30:00"
+      selector:
+        time:
+    open_for:
+      name: Open for at least (minutes) / Otwarte co najmniej (minut)
+      description: Later in the evening a door left open this long also counts. / Wieczorem tyle otwarte też się liczy.
+      default: 15
+      selector:
+        number: { min: 1, max: 240, mode: box, unit_of_measurement: min }
+    notify:
+      name: Notify / Powiadom
+      description: One mobile_app notify service, e.g. notify.mobile_app_phone (the button answer comes back from it).
+      selector:
+        text:
+    node:
+      name: Node with LoRa (optional) / Nod z LoRa (opcjonalnie)
+      description: Only for the "Close" button. / Tylko dla przycisku „Zamknij”.
+      default: ""
+      selector:
+        device:
+          integration: sensmos
+    dst:
+      name: Node id8 / id8 noda
+      default: ""
+      selector:
+        text:
+    sub:
+      name: Relay board number (sub) / Numer płytki z przekaźnikiem (sub)
+      default: 5
+      selector:
+        number: { min: 1, max: 255, mode: box }
+    key:
+      name: Relay key and value / Klucz i wartość przekaźnika
+      description: >-
+        What closes the gate, as in the board's `switches:`, e.g. relay=1 for a push-button opener (set the relay to
+        switch itself off after a second in the board's YAML) or close=1. / Co zamyka bramę, np. relay=1.
+      default: relay=1
+      selector:
+        text:
+
+mode: single
+
+variables:
+  contact: !input contact
+  gate: !input name
+  notify: !input notify
+  node: !input node
+  dst: !input dst
+  sub: !input sub
+  key: !input key
+  can_close: "{{ node != '' and dst | trim != '' and '=' in key }}"
+  tag: "sensmos-brama-{{ contact | replace('.', '-') }}"
+
+trigger:
+  - platform: sun
+    event: sunset
+    offset: !input after_sunset
+  - platform: state
+    entity_id: !input contact
+    for:
+      minutes: !input open_for
+
+action:
+  - variables:
+      is_open: "{{ states(contact) | lower in ['on', '1', '1.0', 'open', 'true'] }}"
+  - condition: "{{ is_open and not is_state('sun.sun', 'above_horizon') }}"
+  - service: "{{ notify }}"
+    data:
+      title: "{{ gate }}: otwarte po zmroku"
+      message: "{{ gate }} jest otwarta od {{ relative_time(states[contact].last_changed) }}."
+      data:
+        tag: "{{ tag }}"
+        actions: >-
+          {{ ([{'action': 'CLOSE_' ~ tag, 'title': 'Zamknij / Close'}] if can_close else [])
+             + [{'action': 'LEAVE_' ~ tag, 'title': 'Zostaw / Leave'}] }}
+  - condition: "{{ can_close }}"
+  - wait_for_trigger:
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "CLOSE_{{ tag }}"
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "LEAVE_{{ tag }}"
+    timeout: { minutes: 30 }
+    continue_on_timeout: false
+  - condition: "{{ wait.trigger.event.data.action == 'CLOSE_' ~ tag }}"
+  - service: sensmos.lora_send
+    data:
+      device_id: "{{ node }}"
+      dst: "{{ dst | trim | lower }}"
+      sub: "{{ sub | int }}"
+      payload: "c={{ now().timestamp() | int }};{{ key | trim }}"
+      aes: true
+  - wait_template: "{{ states(contact) | lower not in ['on', '1', '1.0', 'open', 'true'] }}"
+    timeout: { minutes: 3 }
+  - service: "{{ notify }}"
+    data:
+      title: "{{ gate }}: {{ 'zamknięta' if wait.completed else 'NIE zamknęła się' }}"
+      message: >-
+        {{ 'Kontaktron potwierdził zamknięcie.' if wait.completed else
+           'Polecenie poszło radiem, ale kontaktron dalej mówi, że jest otwarta. Sprawdź na miejscu.' }}
+      data:
+        tag: "{{ tag }}"

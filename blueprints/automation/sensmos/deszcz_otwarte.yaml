@@ -1,0 +1,79 @@
+blueprint:
+  name: Sensmos – pada, a okno albo drzwi otwarte
+  description: >-
+    When it starts to rain (the rain gauge of the garden weather station grows, or the weather entity turns rainy) and
+    a window, skylight, greenhouse vent or shed door you picked is open, you get one notification with the list of
+    what is open. At most once an hour. /
+    Gdy zaczyna padać (deszczomierz stacji pogodowej na działce rośnie albo encja pogody zmienia się na deszcz),
+    a wybrane okno, okno dachowe, wietrznik szklarni albo drzwi szopy są otwarte, dostajesz jedno powiadomienie
+    z listą tego, co otwarte. Najwyżej raz na godzinę.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/deszcz_otwarte.yaml
+  input:
+    rain:
+      name: Rain gauge (optional) / Deszczomierz (opcjonalnie)
+      description: A growing rain total in mm, e.g. sensor.sensmos_lora_19_rain.
+      default: []
+      selector:
+        entity:
+          domain: sensor
+    weather:
+      name: Weather (optional) / Pogoda (opcjonalnie)
+      description: Used when there is no rain gauge, or as a second source. / Gdy nie ma deszczomierza albo jako drugie źródło.
+      default: []
+      selector:
+        entity:
+          domain: weather
+    contacts:
+      name: Windows and doors / Okna i drzwi
+      description: On/1 while open. / Włączone albo 1, gdy otwarte.
+      selector:
+        entity:
+          domain: [sensor, binary_sensor]
+          multiple: true
+    notify:
+      name: Notify / Powiadom
+      description: Notify services separated by commas.
+      selector:
+        text:
+
+mode: single
+max_exceeded: silent
+
+variables:
+  contacts: !input contacts
+  notify: !input notify
+  targets: "{{ notify.split(',') | map('trim') | reject('eq', '') | list }}"
+
+trigger:
+  - platform: state
+    entity_id: !input rain
+    id: gauge
+  - platform: state
+    entity_id: !input weather
+    to: [rainy, pouring, lightning-rainy, snowy-rainy, hail]
+    id: weather
+
+action:
+  - condition: >-
+      {{ trigger.id == 'weather' or
+         (trigger.from_state is not none and trigger.to_state is not none and
+          (trigger.to_state.state | float(0)) > (trigger.from_state.state | float(0)) and
+          (trigger.from_state.state | float(-1)) >= 0) }}
+  - variables:
+      open_now: >-
+        {{ (contacts if contacts is list else [contacts])
+           | select('is_state', ['on', '1', '1.0', 'open', 'true']) | list }}
+  - condition: "{{ open_now | count > 0 }}"
+  - repeat:
+      for_each: "{{ targets }}"
+      sequence:
+        - service: "{{ repeat.item }}"
+          continue_on_error: true
+          data:
+            title: "Pada, a {{ 'otwarte jest' if open_now | count == 1 else 'otwarte są' }}: {{ open_now | count }}"
+            message: >-
+              {% for e in open_now %}{{ state_attr(e, 'friendly_name') or e }}{{ ', ' if not loop.last }}{% endfor %}
+            data: { tag: "sensmos-deszcz-otwarte" }
+  # Najwyżej raz na godzinę (kolejne ramki deszczomierza w tym czasie nic nie wysyłają).
+  - delay: { hours: 1 }
