@@ -7,8 +7,8 @@ import logging
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv, device_registry as dr, translation
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -16,7 +16,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.storage import Store
 
 from .api import SensmosApi, SensmosApiError, SensmosAuthError
-from .cloud import CloudAuthError, CloudConnectError, SensmosCloud
+from .cloud import CloudAuthError, CloudConnectError, CloudSendError, SensmosCloud
 from .const import (
     CLOUD_PLATFORMS,
     CONF_HOST,
@@ -26,11 +26,13 @@ from .const import (
     DATA_PLATFORMS,
     DOMAIN,
     EVENT_DEVICE_MESSAGE,
+    EVENT_DEVICE_MESSAGE_STATE,
     MODE_CLOUD,
     MODE_DATA,
     OPT_FEEDS,
     OPT_WEBHOOK,
     PLATFORMS,
+    SERVICE_MESSENGER_SEND,
     telemetry_key,
 )
 from .coordinator import GatewayCoordinator, SensmosCoordinator
@@ -48,6 +50,14 @@ SERVICE_PUSH_SCHEMA = vol.Schema(
         vol.Required("entity_id"): cv.string,
         vol.Required("value"): cv.string,
         vol.Optional("unit", default=""): cv.string,
+    }
+)
+
+SERVICE_MESSENGER_SEND_SCHEMA = vol.Schema(
+    {
+        vol.Required("messenger"): vol.All(cv.string, vol.Length(min=1, max=40)),
+        vol.Required("message"): vol.All(cv.string, vol.Length(min=1, max=400)),
+        vol.Optional("entry_id"): cv.string,
     }
 )
 
@@ -132,6 +142,17 @@ async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> b
         hass.bus.async_fire(EVENT_DEVICE_MESSAGE, {**m, "device_id": dev.id if dev else None})
         async_dispatcher_send(hass, msg_signal(entry.entry_id), m)
 
+    def on_ldev_state(m: dict) -> None:
+        key = (DOMAIN, account_key(entry))
+        dev = next((d for d in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+                    if key in d.identifiers), None)
+        hass.bus.async_fire(EVENT_DEVICE_MESSAGE_STATE, {**m, "device_id": dev.id if dev else None})
+
+    def on_ldevs(_items: list) -> None:
+        # nowy albo odparowany komunikator → nowy komplet encji powiadomień
+        if ready:
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+
     def on_frame(m: dict) -> dict | None:
         c = coords.get(str(m.get("gw") or "").lower())
         return c.on_frame(m) if c else None
@@ -145,7 +166,7 @@ async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> b
     def save() -> None:
         store.async_delay_save(lambda: {g: c.dump() for g, c in coords.items()}, 10)
 
-    cloud = SensmosCloud(hass, entry, on_gateways, on_frame, on_stats, on_ldev_msg)
+    cloud = SensmosCloud(hass, entry, on_gateways, on_frame, on_stats, on_ldev_msg, on_ldev_state, on_ldevs)
     try:
         await cloud.connect()
     except CloudAuthError as err:
@@ -163,7 +184,46 @@ async def _async_setup_cloud_entry(hass: HomeAssistant, entry: ConfigEntry) -> b
     }
     await hass.config_entries.async_forward_entry_setups(entry, CLOUD_PLATFORMS)
     entry.async_create_background_task(hass, cloud.run(), f"{DOMAIN}_cloud_{entry.entry_id}")
+    _register_cloud_services(hass)
     return True
+
+
+def _cloud_for_call(hass: HomeAssistant, call: ServiceCall) -> tuple[SensmosCloud, str]:
+    """Wpis konta i id8 komunikatora z wywołania: po id8 albo nazwie, wśród komunikatorów kont."""
+    want = str(call.data["messenger"]).strip()
+    entries = [
+        (eid, d) for eid, d in hass.data.get(DOMAIN, {}).items()
+        if d.get("mode") == MODE_CLOUD and (not call.data.get("entry_id") or eid == call.data["entry_id"])
+    ]
+    if not entries:
+        raise HomeAssistantError("No Sensmos account (cloud mode) is set up")
+    for _eid, d in entries:
+        cloud: SensmosCloud = d["cloud"]
+        for m in cloud.ldevs:
+            if m["id8"] == want.lower() or (m["name"] and m["name"].casefold() == want.casefold()):
+                return cloud, m["id8"]
+    # id8 spoza listy (np. świeżo sparowany) — serwer i tak sprawdzi, czy to komunikator tego konta
+    if len(want) == 8 and all(c in "0123456789abcdefABCDEF" for c in want) and len(entries) == 1:
+        return entries[0][1]["cloud"], want.lower()
+    raise HomeAssistantError(f"Messenger not found on the Sensmos account: {want}")
+
+
+def _register_cloud_services(hass: HomeAssistant) -> None:
+    if hass.services.has_service(DOMAIN, SERVICE_MESSENGER_SEND):
+        return
+
+    async def handle_messenger_send(call: ServiceCall) -> ServiceResponse:
+        cloud, id8 = _cloud_for_call(hass, call)
+        try:
+            msg_id = await cloud.send_ldev(id8, call.data["message"])
+        except CloudSendError as err:
+            raise HomeAssistantError(f"Sensmos messenger {id8}: {err}") from err
+        return {"msg_id": msg_id, "messenger": id8}
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_MESSENGER_SEND, handle_messenger_send,
+        schema=SERVICE_MESSENGER_SEND_SCHEMA, supports_response=SupportsResponse.OPTIONAL,
+    )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

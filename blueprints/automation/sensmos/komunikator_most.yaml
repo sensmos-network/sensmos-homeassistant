@@ -1,0 +1,200 @@
+blueprint:
+  name: Sensmos – komunikator ↔ Meshtastic ↔ MeshCore
+  description: >-
+    One bridge for your Sensmos messenger, a Meshtastic channel and a MeshCore channel, in Home Assistant.
+    The messenger reaches Home Assistant through any Sensmos gateway or node that hears it (account mode of the
+    integration, 0.13.0 or newer), and answers go back the same way, so it works far from home. A messenger message
+    that starts with "m " goes to the Meshtastic channel, one that starts with "c " goes to the MeshCore channel.
+    Text from those channels goes to the messenger as "M name: text" / "C name: text". Optionally the Meshtastic
+    and MeshCore channels are joined to each other too. Meshtastic needs a node with Wi-Fi as the MQTT gateway
+    (JSON output on, a channel named "mqtt" with downlink) and the MQTT integration; MeshCore needs the MeshCore
+    integration (HACS, meshcore-dev/meshcore-ha) with a companion radio. Leave a network empty to skip it. /
+    Jeden most dla komunikatora Sensmos, kanału Meshtastic i kanału MeshCore, w Home Assistant. Komunikator dociera
+    do HA przez dowolną bramę albo nod Sensmos, który go słyszy (tryb konta integracji, 0.13.0 i nowsza), a
+    odpowiedzi wracają tą samą drogą, więc działa daleko od domu. Wiadomość z komunikatora zaczynająca się od „m ”
+    idzie na kanał Meshtastic, od „c ” na kanał MeshCore. Tekst z tych kanałów idzie do komunikatora jako
+    „M imię: tekst” / „C imię: tekst”. Opcjonalnie kanały Meshtastic i MeshCore łączą się też ze sobą. Puste pole
+    sieci = ta sieć pominięta.
+  domain: automation
+  source_url: https://github.com/sensmos-network/sensmos-homeassistant/blob/main/blueprints/automation/sensmos/komunikator_most.yaml
+  input:
+    messenger:
+      name: Messenger / Komunikator
+      description: >-
+        The messenger's name as in the Sensmos app (or its id8, 8 hex characters). It must be paired with the
+        account that the Sensmos integration uses in account mode.
+      selector:
+        text:
+    label:
+      name: Name on the mesh / Imię na kanałach
+      description: Shown in front of the messenger's messages on Meshtastic and MeshCore, e.g. "Piotr".
+      default: Sensmos
+      selector:
+        text:
+    mt_gateway:
+      name: Meshtastic gateway node (empty = no Meshtastic) / Nod-bramka Meshtastic (puste = bez Meshtastic)
+      description: The id of the Meshtastic node with Wi-Fi that publishes to your MQTT broker, e.g. !7efeee00.
+      default: ""
+      selector:
+        text:
+    mt_root:
+      name: Meshtastic MQTT root topic / Główny temat MQTT
+      description: As in the gateway's MQTT settings, without a slash at the end.
+      default: msh/EU_868
+      selector:
+        text:
+    mt_channel:
+      name: Meshtastic channel index / Numer kanału Meshtastic
+      description: >-
+        0–7. Use a private channel (e.g. 1 "Rodzina"), not the public LongFast: every message from the channel
+        goes to the messenger over radio.
+      default: 1
+      selector:
+        number: { min: 0, max: 7, mode: box }
+    mc_channel:
+      name: MeshCore channel index (-1 = no MeshCore) / Numer kanału MeshCore (-1 = bez MeshCore)
+      description: The channel index on your MeshCore companion. Use a private channel, not Public (0).
+      default: -1
+      selector:
+        number: { min: -1, max: 255, mode: box }
+    mc_entry:
+      name: MeshCore companion entry (optional) / Wpis MeshCore (opcjonalnie)
+      description: Only if you have more than one MeshCore companion in Home Assistant.
+      default: ""
+      selector:
+        text:
+    join_meshes:
+      name: Join Meshtastic and MeshCore too / Połącz też Meshtastic z MeshCore
+      description: >-
+        Text from the Meshtastic channel goes to the MeshCore channel as "[M] name: text" and the other way as
+        "[C] name: text".
+      default: false
+      selector:
+        boolean:
+    only_mention:
+      name: Only messages with the messenger's name / Tylko wiadomości z imieniem komunikatora
+      description: >-
+        Forward to the messenger only channel messages that contain the name above (or "@sensmos"). Off = every
+        message. The Sensmos network sends up to 30 messages an hour to one account's messengers.
+      default: false
+      selector:
+        boolean:
+
+mode: queued
+max: 20
+
+trigger_variables:
+  mt_root_t: !input mt_root
+
+trigger:
+  - platform: event
+    event_type: sensmos_device_message
+    id: kom
+  - platform: mqtt
+    topic: "{{ mt_root_t }}/2/json/#"
+    id: mt
+  - platform: event
+    event_type: meshcore_message
+    id: mc
+
+variables:
+  messenger: !input messenger
+  label: !input label
+  mt_gateway: !input mt_gateway
+  mt_root: !input mt_root
+  mt_channel: !input mt_channel
+  mc_channel: !input mc_channel
+  mc_entry: !input mc_entry
+  join_meshes: !input join_meshes
+  only_mention: !input only_mention
+  want: "{{ messenger | trim | lower }}"
+  gw_hex: "{{ mt_gateway | lower | replace('!', '') | trim }}"
+  gw_num: "{{ gw_hex | int(0, 16) if gw_hex else 0 }}"
+  mt_on: "{{ gw_num | int > 0 }}"
+  mc_on: "{{ mc_channel | int(-1) >= 0 }}"
+  mt_topic: "{{ mt_root | trim | regex_replace('/+$', '') }}/2/json/mqtt/"
+  mc_data: >-
+    {{ {'channel_idx': mc_channel | int(0)} if not (mc_entry | trim) else {'channel_idx': mc_channel | int(0), 'entry_id': mc_entry | trim} }}
+
+action:
+  - choose:
+      # ── komunikator → Meshtastic / MeshCore ──
+      - conditions:
+          - "{{ trigger.id == 'kom' }}"
+          - "{{ (trigger.event.data.device or '') | lower == want or (trigger.event.data.name or '') | lower == want }}"
+          - "{{ (trigger.event.data.text or '') is search('^[mMcC] .') }}"
+        sequence:
+          - variables:
+              k: "{{ trigger.event.data.text[:1] | lower }}"
+              body: "{{ trigger.event.data.text[2:] | trim }}"
+          - if: "{{ k == 'm' and mt_on }}"
+            then:
+              - service: mqtt.publish
+                data:
+                  topic: "{{ mt_topic }}"
+                  payload: >-
+                    {{ {'from': gw_num | int, 'type': 'sendtext', 'channel': mt_channel | int,
+                        'payload': ('[' ~ label ~ '] ' ~ body)[:200]} | to_json }}
+          - if: "{{ k == 'c' and mc_on }}"
+            then:
+              - service: meshcore.send_channel_message
+                data: "{{ dict(mc_data, message=(label ~ ': ' ~ body)[:140], truncate=true) }}"
+
+      # ── Meshtastic → komunikator (i opcjonalnie → MeshCore) ──
+      - conditions:
+          - "{{ trigger.id == 'mt' and mt_on }}"
+          - "{{ trigger.payload_json is defined and trigger.payload_json is mapping }}"
+          - "{{ trigger.payload_json.type == 'text' }}"
+          - "{{ (trigger.payload_json.channel | int(-1)) == (mt_channel | int) }}"
+          - "{{ (trigger.payload_json.from | int(0)) != (gw_num | int) }}"
+          - "{{ (trigger.payload_json.payload.text | default('')) | trim != '' }}"
+          - "{{ not ((trigger.payload_json.payload.text | trim).startswith('[C] ') or (trigger.payload_json.payload.text | trim).startswith('[' ~ label ~ '] ')) }}"
+        sequence:
+          - variables:
+              hexid: "{{ '%08x' | format(trigger.payload_json.from | int(0)) }}"
+              # nazwa z mostu Meshtastic w Hubie, jeśli jest (sensor.meshtastic_<id>), inaczej !id
+              who: >-
+                {% set n = (state_attr('sensor.meshtastic_' ~ hexid, 'friendly_name') or '') | replace('Meshtastic ', '') %}
+                {{ n if n and not n.startswith('!') else '!' ~ hexid }}
+              txt: "{{ trigger.payload_json.payload.text | trim }}"
+          - if: "{{ not only_mention or (label | lower) in (txt | lower) or (messenger | lower) in (txt | lower) or '@sensmos' in (txt | lower) }}"
+            then:
+              - service: sensmos.messenger_send
+                continue_on_error: true
+                data:
+                  messenger: "{{ messenger }}"
+                  message: "M {{ who[:12] }}: {{ txt }}"
+          - if: "{{ join_meshes and mc_on }}"
+            then:
+              - service: meshcore.send_channel_message
+                continue_on_error: true
+                data: "{{ dict(mc_data, message=('[M] ' ~ who[:12] ~ ': ' ~ txt)[:140], truncate=true) }}"
+
+      # ── MeshCore → komunikator (i opcjonalnie → Meshtastic) ──
+      - conditions:
+          - "{{ trigger.id == 'mc' and mc_on }}"
+          - "{{ not (trigger.event.data.outgoing | default(false)) }}"
+          - "{{ trigger.event.data.message_type == 'channel' }}"
+          - "{{ (trigger.event.data.channel_idx | int(-1)) == (mc_channel | int) }}"
+          - "{{ not (mc_entry | trim) or trigger.event.data.entry_id == (mc_entry | trim) }}"
+          - "{{ (trigger.event.data.message or '') | trim != '' }}"
+          - "{{ not (trigger.event.data.message | trim).startswith('[M] ') }}"
+        sequence:
+          - variables:
+              who: "{{ trigger.event.data.sender_name or 'MeshCore' }}"
+              txt: "{{ trigger.event.data.message | trim }}"
+          - if: "{{ not only_mention or (label | lower) in (txt | lower) or (messenger | lower) in (txt | lower) or '@sensmos' in (txt | lower) }}"
+            then:
+              - service: sensmos.messenger_send
+                continue_on_error: true
+                data:
+                  messenger: "{{ messenger }}"
+                  message: "C {{ who[:12] }}: {{ txt }}"
+          - if: "{{ join_meshes and mt_on }}"
+            then:
+              - service: mqtt.publish
+                data:
+                  topic: "{{ mt_topic }}"
+                  payload: >-
+                    {{ {'from': gw_num | int, 'type': 'sendtext', 'channel': mt_channel | int,
+                        'payload': ('[C] ' ~ who[:12] ~ ': ' ~ txt)[:200]} | to_json }}

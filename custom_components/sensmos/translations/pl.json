@@ -197,6 +197,9 @@
   },
   "device": { "account": { "name": "Konto Sensmos" } },
   "entity": {
+    "notify": {
+      "messenger": { "name": "Komunikator {name}" }
+    },
     "sensor": { "ldev_last_message": { "name": "Ostatnia wiadomość" } },
     "event": {
       "ldev_message": {

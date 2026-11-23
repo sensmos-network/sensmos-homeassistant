@@ -118,7 +118,10 @@ EVENT_LORA_CMD = "sensmos_lora_cmd"
 EVENT_LORA_FRAME = "sensmos_lora_frame"
 # Wiadomość z urządzenia sparowanego z kontem (np. komunikator: „kod:ALARM”) — tryb chmury.
 EVENT_DEVICE_MESSAGE = "sensmos_device_message"
+# Stan wiadomości z HA (albo apki) do komunikatora: delivered (komunikator potwierdził radiem) / failed.
+EVENT_DEVICE_MESSAGE_STATE = "sensmos_device_message_state"
+SERVICE_MESSENGER_SEND = "messenger_send"
 
 PLATFORMS = ["sensor", "binary_sensor"]
-CLOUD_PLATFORMS = ["sensor", "binary_sensor", "event"]
+CLOUD_PLATFORMS = ["sensor", "binary_sensor", "event", "notify"]
 DATA_PLATFORMS = ["sensor"]   # tryb data: tylko sensory (podgląd GET)

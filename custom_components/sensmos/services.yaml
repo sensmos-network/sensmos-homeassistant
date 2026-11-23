@@ -70,3 +70,32 @@ lora_send:
       default: true
       selector:
         boolean:
+
+messenger_send:
+  name: Napisz do komunikatora
+  description: >-
+    Wysyła tekst do komunikatora Sensmos sparowanego z kontem (tryb konta), przez sieć Sensmos: najbliższa brama
+    albo nod, który słyszał komunikator. Do 100 bajtów. Stan doręczenia przychodzi zdarzeniem
+    sensmos_device_message_state (delivered / failed).
+  fields:
+    messenger:
+      name: Komunikator
+      description: Nazwa komunikatora (jak w apce) albo jego id8 (8 znaków hex).
+      required: true
+      example: Tatry
+      selector:
+        text:
+    message:
+      name: Treść
+      description: Tekst; dłuższy niż 100 bajtów jest ucinany, nowe linie zamieniane na spacje.
+      required: true
+      example: "Brama otwarta po zmroku"
+      selector:
+        text:
+    entry_id:
+      name: Konto
+      description: Wpis konta Sensmos, gdy masz więcej niż jedno.
+      required: false
+      selector:
+        config_entry:
+          integration: sensmos
